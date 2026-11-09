@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# PyInstaller build output
+build/
+build_installer/build/
+build_installer/dist/
+build_installer/stage/
+build_installer/test_install/
+dist/
+
+# pytest
+.pytest_cache/
+
+# Release artifacts are committed intentionally so they can be
+# downloaded directly from the repository (raw links).
+# release/*.exe is NOT ignored.
