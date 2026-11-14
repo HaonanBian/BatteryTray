@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "BatteryTray"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 PUBLISHER = "BatteryTray"
 
 # The per-user uninstall entry. It lives under HKEY_CURRENT_USER, so no
@@ -360,14 +360,14 @@ def install(install_dir: Path, desktop_shortcut: bool = True,
     create_shortcut(
         start_menu_dir() / APP_NAME / f"{APP_NAME}.lnk",
         target=str(exe), working_dir=str(install_dir),
-        description=f"{APP_NAME} - 鼠标与耳机电量", icon=icon)
+        description=f"{APP_NAME} - 鼠标、键盘与耳机电量", icon=icon)
 
     if desktop_shortcut:
         report("正在创建桌面快捷方式…")
         create_shortcut(
             desktop_dir() / f"{APP_NAME}.lnk",
             target=str(exe), working_dir=str(install_dir),
-            description=f"{APP_NAME} - 鼠标与耳机电量", icon=icon)
+            description=f"{APP_NAME} - 鼠标、键盘与耳机电量", icon=icon)
 
     if autostart:
         report("正在设置开机自启…")

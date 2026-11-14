@@ -28,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "build_installer"
 DIST = ROOT / "release"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 APP_NAME = "BatteryTray"
 APP_EXE = "BatteryTray.exe"
@@ -197,12 +197,19 @@ def main() -> None:
         setup.unlink()
     shutil.copy2(installer_exe, setup)
 
+    # The standalone copy is the simplest download: one exe, no installer.
+    standalone = DIST / f"{APP_NAME}-{VERSION}.exe"
+    if standalone.exists():
+        standalone.unlink()
+    shutil.copy2(app_exe, standalone)
+
     archive = make_portable(app_exe)
 
     print()
     print("打包完成：")
     print(f"  安装程序（单文件，可直接发送）  {setup}")
     print(f"  便携版                        {archive}")
+    print(f"  单文件版                      {standalone}")
 
 
 if __name__ == "__main__":

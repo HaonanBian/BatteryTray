@@ -146,11 +146,6 @@ class DeviceRow(tk.Frame):
             anchor="e")
         self.percent_label.place(relx=1.0, x=-s(14), y=s(8), anchor="ne")
 
-        self.rename_icon = tk.Label(
-            self, text="", bg=PANEL_BG, fg=MUTED, font=self._icon_font)
-        self.rename_icon.place(relx=1.0, x=-s(14), y=s(31), anchor="ne")
-        self.rename_icon.bind("<Button-1>", self._start_rename)
-
         for widget in (self, self.icon_label, self.name_label,
                        self.state_label, self.percent_label):
             widget.bind("<Button-3>", self._open_rename_menu)
@@ -170,8 +165,7 @@ class DeviceRow(tk.Frame):
             return
         self._hover = True
         for widget in (self, self.icon_label, self.name_label,
-                       self.state_label, self.percent_label,
-                       self.rename_icon):
+                       self.state_label, self.percent_label):
             widget.configure(bg=self._fill())
 
     def _leave(self, _event=None) -> None:
@@ -179,8 +173,7 @@ class DeviceRow(tk.Frame):
             return
         self._hover = False
         for widget in (self, self.icon_label, self.name_label,
-                       self.state_label, self.percent_label,
-                       self.rename_icon):
+                       self.state_label, self.percent_label):
             widget.configure(bg=PANEL_BG)
 
     # ------------------------------------------------------------------
@@ -235,7 +228,6 @@ class DeviceRow(tk.Frame):
             value = f"{device.percent}%"
             color = FG
         self.percent_label.configure(text=value, fg=color)
-        self.rename_icon.configure(text="\ue70f")
 
         if device.charging:
             text, state_color = "充电中", CHARGING

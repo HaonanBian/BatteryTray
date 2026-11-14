@@ -15,7 +15,8 @@ from PIL import Image
 from batterytray import autostart, singleton
 from batterytray.app import Device, build_tooltip, collect_devices
 from batterytray.config import Config
-from batterytray.drivers import asusmouse, bluetooth, mouseadapter, mouseconfig, razer
+from batterytray.drivers import (asusmouse, bluetooth, hidvendor, logitech,
+                                  mouseadapter, mouseconfig, razer)
 from batterytray.icon import (DeviceState, build_device_icon, build_icon,
                               level_color)
 
@@ -297,6 +298,14 @@ def test_the_asus_packet_uses_the_report_id_of_the_connection():
     assert asusmouse._report_id_for(asusmouse.PRODUCT_WIRELESS) == 0x00
 
 
+def test_the_asus_packet_size_matches_the_interface():
+    """The direct interface needs 65 bytes, the Omni report is 64."""
+    assert asusmouse._packet_size_for(asusmouse.PRODUCT_WIRED) == 65
+    assert asusmouse._packet_size_for(asusmouse.PRODUCT_WIRELESS) == 65
+    assert asusmouse._packet_size_for(
+        asusmouse.PRODUCT_OMNI_RECEIVER) == 64
+
+
 def test_the_asus_dpi_encoding_round_trips():
     """The DPI is stored in steps of 50 starting at 50."""
     for dpi in (100, 400, 800, 1600, 3200, 36000):
@@ -568,7 +577,104 @@ def test_every_asus_assignable_code_has_a_name():
 
 def test_the_asus_polling_rates_are_the_supported_ones():
     """The Keris Aimpoint supports 125 to 1000 Hz."""
-    assert set(asusmouse.POLLING_RATES) >= {125, 250, 500, 1000}
+    assert asusmouse.SUPPORTED_POLLING_RATES == (125, 250, 500, 1000)
+    # The higher codes exist in the protocol, but need a different
+    # receiver and must not be offered for this mouse.
+    assert 2000 not in asusmouse.SUPPORTED_POLLING_RATES
+    assert 8000 not in asusmouse.SUPPORTED_POLLING_RATES
+
+
+def test_the_asus_control_interface_is_the_vendor_collection():
+    """Only the MI_00 collection of a known mouse is opened."""
+    base = {"vendor_id": asusmouse.ASUS_VID,
+            "product_id": asusmouse.PRODUCT_WIRELESS,
+            "usage_page": 0xFF01, "usage": 1}
+
+    direct = dict(base, path="\\\\?\\HID#VID_0B05&PID_1A68&MI_00#8&1")
+    assert asusmouse._is_control_interface(direct)
+
+    mouse_reports = dict(base, path="\\\\?\\HID#VID_0B05&PID_1A68&MI_01#8&1")
+    assert not asusmouse._is_control_interface(mouse_reports)
+
+    keyboard = dict(base, product_id=0x19B6,
+                    path="\\\\?\\HID#VID_0B05&PID_19B6&Col01#6&1")
+    assert not asusmouse._is_control_interface(keyboard)
+
+
+def test_the_omni_receiver_uses_the_third_collection():
+    """The Omni multiplexes the mouse control channel on MI_02&Col03."""
+    omni = {
+        "vendor_id": asusmouse.ASUS_VID,
+        "product_id": asusmouse.PRODUCT_OMNI_RECEIVER,
+        "usage_page": 0xFF01,
+        "usage": 1,
+        "path": "\\\\?\\HID#VID_0B05&PID_1ACE&MI_02&Col03#9&1",
+    }
+    assert asusmouse._is_control_interface(omni)
+
+    keyboard_channel = dict(
+        omni, path="\\\\?\\HID#VID_0B05&PID_1ACE&MI_02&Col02#9&1")
+    assert not asusmouse._is_control_interface(keyboard_channel)
+
+
+def test_the_asus_transport_skips_events_until_the_answer():
+    """A queued button event must not be mistaken for the battery answer."""
+    class FakeHandle:
+        def __init__(self):
+            self.reads = [
+                bytearray(64),                    # drain: nothing pending
+                bytes([0x00, 0x12, 0x01] + [0] * 61),  # a button event
+                bytes([0x00, 0x12, 0x07] + [0] * 61),  # the answer
+            ]
+            self.reads[-1] = bytearray(self.reads[-1])
+            self.reads[-1][5] = 77
+            self.writes = []
+
+        def read(self, size, timeout_ms=0):
+            if timeout_ms <= 1:
+                return []
+            return self.reads.pop(0) if self.reads else []
+
+        def write(self, data):
+            self.writes.append(bytes(data))
+
+    controller = asusmouse.AsusMouseController.__new__(
+        asusmouse.AsusMouseController)
+    controller.path = ""
+    controller.product_id = asusmouse.PRODUCT_WIRELESS
+    controller.name = "test"
+    controller.report_id = 0x00
+    controller._handle = FakeHandle()
+
+    assert controller.get_battery() == (77, False)
+    assert len(controller._handle.writes) == 1
+
+
+def test_the_asus_error_answer_is_reported_as_unsupported():
+    """FF AA is the firmware's "unknown command" answer."""
+    class FakeHandle:
+        def __init__(self):
+            self.reads = [bytearray(64),
+                          bytes([0x00, 0xFF, 0xAA] + [0] * 61)]
+
+        def read(self, size, timeout_ms=0):
+            if timeout_ms <= 1:
+                return []
+            return self.reads.pop(0) if self.reads else []
+
+        def write(self, data):
+            pass
+
+    controller = asusmouse.AsusMouseController.__new__(
+        asusmouse.AsusMouseController)
+    controller.path = ""
+    controller.product_id = asusmouse.PRODUCT_WIRELESS
+    controller.name = "test"
+    controller.report_id = 0x00
+    controller._handle = FakeHandle()
+
+    with pytest.raises(asusmouse.AsusMouseError, match="不支持"):
+        controller.get_battery()
 
 
 # --------------------------------------------------------------------------
@@ -644,7 +750,9 @@ def test_the_adapter_reads_the_asus_settings():
     assert settings.dpi == 400
     assert settings.polling_rate == 1000
     assert [stage.dpi for stage in settings.stages] == [400, 800]
-    assert settings.supported_rates == tuple(sorted(asusmouse.POLLING_RATES))
+    # The ASUS protocol counts stages from one.
+    assert settings.active_stage == 0
+    assert settings.supported_rates == asusmouse.SUPPORTED_POLLING_RATES
 
     adapter.apply_settings(dpi=400, polling_rate=500,
                            stages=[mouseconfig.DpiStage(dpi=400)])
@@ -2688,3 +2796,117 @@ def test_the_charge_bar_grows_with_the_level():
         return max(points[0::2]) - min(points[0::2])
 
     assert width_of(high) > width_of(low)
+
+
+# --------------------------------------------------------------------------
+# Logitech HID++ and other 2.4 GHz brands
+# --------------------------------------------------------------------------
+
+class _HidppHandle:
+    """A fake HID handle that replays prepared answers."""
+
+    def __init__(self, answers):
+        self.answers = [bytes(answer) for answer in answers]
+        self.writes = []
+
+    def write(self, data):
+        self.writes.append(bytes(data))
+
+    def read(self, size, timeout_ms=0):
+        return self.answers.pop(0) if self.answers else []
+
+    def close(self):
+        pass
+
+
+def _hidpp_controller(answers):
+    controller = logitech.LogitechHidpp.__new__(logitech.LogitechHidpp)
+    controller.path = ""
+    controller.product_id = 0xC548
+    controller.product_string = "USB Receiver"
+    controller.index = 0xFF
+    controller.report_id = logitech.REPORT_LONG
+    controller.packet_length = logitech.LONG_LENGTH
+    controller._handle = _HidppHandle(answers)
+    return controller
+
+
+def test_logitech_battery_status_is_read_from_0x1000():
+    """The 0x1000 answer holds level, next level and charging state."""
+    index = 0x05
+    controller = _hidpp_controller([
+        bytes([0x11, 0xFF, 0x00, 0x00, index] + [0] * 15),
+        bytes([0x11, 0xFF, index, 0x00, 87, 0, 0] + [0] * 13),
+    ])
+    assert controller.battery() == (87, False)
+
+
+def test_logitech_unified_battery_uses_the_coarse_bucket():
+    """0x1004 can report only a bucket; 4 means good rather than empty."""
+    index = 0x07
+    controller = _hidpp_controller([
+        bytes([0x11, 0xFF, 0x00, 0x00, 0] + [0] * 15),       # 0x1000 absent
+        bytes([0x11, 0xFF, 0x00, 0x00, index] + [0] * 15),   # 0x1004 found
+        bytes([0x11, 0xFF, index, 0x00, 0, 4, 3] + [0] * 13),
+    ])
+    assert controller.battery() == (75, True)
+
+
+def test_logitech_voltage_is_only_a_fallback():
+    """A device with 0x1001 gives a voltage, which is converted to percent."""
+    index = 0x09
+    controller = _hidpp_controller([
+        bytes([0x11, 0xFF, 0x00, 0x00, 0] + [0] * 15),       # 0x1000 absent
+        bytes([0x11, 0xFF, 0x00, 0x00, 0] + [0] * 15),       # 0x1004 absent
+        bytes([0x11, 0xFF, 0x00, 0x00, index] + [0] * 15),   # 0x1001 found
+        bytes([0x11, 0xFF, index, 0x00, 0x0F, 0xA0, 0] + [0] * 13),
+    ])
+    percent, charging = controller.battery()
+    assert 2000 <= 4000 <= 5000
+    assert 70 <= percent <= 90
+    assert charging is False
+
+
+def test_logitech_name_tells_keyboards_from_mice():
+    """The HID++ name is used for the icon and the default filter."""
+    assert logitech._kind_from_name("MX Keys S") == "keyboard"
+    assert logitech._kind_from_name("G915 TKL") == "keyboard"
+    assert logitech._kind_from_name("MX Master 3S") == "mouse"
+    assert logitech._kind_from_name("G502 X PLUS") == "mouse"
+
+
+def test_vendor_battery_levels_are_read_from_the_documented_offset():
+    """The ATK/VXE level lives at byte 7, the VAXEE value is in 5% steps."""
+    atk = next(p for p in hidvendor.PROTOCOLS
+               if p.vendor_id == 0x373B and p.usage_page == 0xFF05)
+    answer = bytearray(64)
+    answer[atk.level_offset] = 56
+    assert hidvendor._parse(atk, bytes(answer)) == (56, False)
+
+    vaxee = next(p for p in hidvendor.PROTOCOLS
+                 if p.vendor_id == 0x3057)
+    answer = bytearray(64)
+    answer[vaxee.level_offset] = 15
+    assert hidvendor._parse(vaxee, bytes(answer)) == (75, False)
+
+
+def test_vendor_protocols_are_bound_to_their_vendor_and_usage_page():
+    """A protocol must never be tried on an unrelated HID interface."""
+    for protocol in hidvendor.PROTOCOLS:
+        assert protocol.vendor_id
+        assert protocol.usage_page
+        assert protocol.level_offset < protocol.length
+        assert protocol.report_id <= 0xFF
+
+
+def test_the_vxe_keyboard_status_packet_carries_the_level():
+    """VXE keyboards answer 04 .. .. 1A 06 with the level at byte 8."""
+    packet = bytes([0x04, 0x00, 0x00, 0x1A, 0x06, 0, 0, 0, 12, 1])
+    assert hidvendor._vxe_percent(packet) == (12, True)
+
+    # Command echoes and out-of-range values are not battery reports.
+    assert hidvendor._vxe_percent(bytes([0x04, 0x09, 0x00, 9])) is None
+    assert hidvendor._vxe_percent(
+        bytes([0x04, 0x00, 0x00, 0x1A, 0x06, 0, 0, 0, 0, 1])) is None
+    assert hidvendor._vxe_percent(
+        bytes([0x04, 0x00, 0x00, 0x1A, 0x06, 0, 0, 0, 101, 1])) is None

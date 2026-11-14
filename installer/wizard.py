@@ -91,7 +91,7 @@ class InstallerWindow(tk.Tk):
                  font=(self.family, 13, "bold")).pack(
                      anchor="w", padx=pad, pady=(14, 0))
         subtitle = ("卸载程序" if self.uninstall
-                    else "鼠标与耳机电量 · 版本 " + APP_VERSION)
+                    else "鼠标、键盘与耳机电量 · 版本 " + APP_VERSION)
         tk.Label(header, text=subtitle, bg=BG_CARD, fg=FG_MUTED,
                  font=(self.family, 8)).pack(anchor="w", padx=pad,
                                             pady=(2, 14))
@@ -347,8 +347,12 @@ def _set_state_recursive(widget, state: str) -> None:
 
 def main() -> int:
     """Entry point of the installer."""
-    # The uninstaller is the same program with a different flag.
-    uninstall = "--uninstall" in sys.argv or "/uninstall" in sys.argv
+    # The uninstaller is the same program with a different flag. The
+    # installed copy is called uninstall.exe, so the file name works as a
+    # fallback when Windows starts it without arguments.
+    program = os.path.basename(sys.argv[0]).lower() if sys.argv else ""
+    uninstall = ("--uninstall" in sys.argv or "/uninstall" in sys.argv
+                 or program == "uninstall.exe")
     quiet = "--quiet" in sys.argv or "/quiet" in sys.argv
     silent = "--silent" in sys.argv or "/silent" in sys.argv
 
@@ -359,8 +363,9 @@ def main() -> int:
 
     if silent:
         # Installs without showing anything; used for testing and for
-        # deploying the app on a fleet of machines.
-        folder = payload.default_install_dir()
+        # deploying the app on a fleet of machines. An existing install is
+        # upgraded in place so the shortcuts keep pointing at it.
+        folder = payload.installed_location() or payload.default_install_dir()
         payload.install(folder, desktop_shortcut=True, autostart=True)
         return 0
 

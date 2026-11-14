@@ -1,6 +1,6 @@
 # BatteryTray
 
-Windows 托盘电量显示工具 —— 在系统托盘里查看**鼠标**和**耳机**的电量。
+Windows 托盘电量显示工具 —— 在系统托盘里查看**鼠标、键盘**和**耳机**的电量。
 
 ![托盘图标](assets/batterytray.png)
 
@@ -8,10 +8,10 @@ Windows 托盘电量显示工具 —— 在系统托盘里查看**鼠标**和**�
 
 | 版本 | 文件 | 说明 |
 |------|------|------|
-| **安装版（推荐）** | [`BatteryTray-Setup-1.0.0.exe`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.0.0/BatteryTray-Setup-1.0.0.exe) | 带安装向导，装完自带开始菜单快捷方式和卸载程序 |
-| **便携版** | [`BatteryTray-1.0.0-portable.zip`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.0.0/BatteryTray-1.0.0-portable.zip) | 解压即用，免安装 |
+| **安装版（推荐）** | [`BatteryTray-Setup-1.1.0.exe`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.1.0/BatteryTray-Setup-1.1.0.exe) | 带安装向导，装完自带开始菜单快捷方式和卸载程序 |
+| **便携版** | [`BatteryTray-1.1.0-portable.zip`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.1.0/BatteryTray-1.1.0-portable.zip) | 解压即用，免安装 |
 
-> 免安装用户也可以直接下载 [`BatteryTray-1.0.0.exe`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.0.0/BatteryTray-1.0.0.exe)（单文件版，双击即运行）。
+> 免安装用户也可以直接下载 [`BatteryTray-1.1.0.exe`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.1.0/BatteryTray-1.1.0.exe)（单文件版，双击即运行）。
 >
 > 想要**每个设备一根电量条**还是**只显示最危险的那个**，在设置里一键切换。
 
@@ -19,8 +19,9 @@ Windows 托盘电量显示工具 —— 在系统托盘里查看**鼠标**和**�
 
 ## ✨ 功能一览
 
-- 直接通过 USB HID 读取 **雷蛇毒蝰 V3 Pro** 电量，**不需要装雷蛇 Synapse**，不需要内核驱动，不需要管理员权限
+- 直接通过 USB HID 读取 **雷蛇毒蝰 V3 Pro** 和 **ROG 月刃无线 AimPoint（Keris Wireless AimPoint）** 的电量，**不需要装雷蛇 Synapse / 奥创中心**，不需要内核驱动，不需要管理员权限
 - **直接在软件里改鼠标参数** —— DPI、回报率、DPI 挡位、按键映射，全部写进鼠标板载，关掉软件甚至换台电脑都还在
+- **多品牌电量** —— 罗技 HID++（鼠标 + 键盘）、ATK/VXE/VGN、Endgame Gear、VAXEE/ZYGEN、Nordic nRF 2.4G 设备
 - 通过 Windows 蓝牙协议栈读取**蓝牙耳机**电量
 - **每台在线设备一个托盘图标**：鼠标 / 键盘 / 耳机轮廓，外面一圈环形电量表；**圆环颜色和电量颜色一致**（绿色充足、橙色中等、红色低电、蓝色充电）
 - **左键点击托盘图标**弹出竖排列表：每行是**托盘同款环形图标 + 设备名 + 精确百分比**，点别处自动收起
@@ -102,6 +103,27 @@ python -m venv .venv
 
 毒蝰 V3 Pro 的设备 ID：USB 有线 `PID 0x00C0`，无线接收器 `PID 0x00C1`，transaction id 为 `0x1F`。
 
+### ROG 鼠标：HID 报文
+
+ROG 月刃无线 AimPoint 走的是另一套 HID 协议。命令包是 64 字节负载，直连时前面再加 1 字节 report id（共 65 字节），Omni 接收器则是 64 字节含 report id：
+
+| 偏移 | 字段 |
+|------|------|
+| 0 | report id（有线/2.4G `0x00`，Omni 接收器 `0x03`） |
+| 1 | 命令族：`0x12` 读、`0x51` 写、`0x50` 配置/保存 |
+| 2 | 子命令 |
+| 3–64 | 参数，补零（Omni 到 63） |
+
+几个容易踩的坑：
+
+- 每次写入后必须再发 `0x50 0x03` 保存，否则鼠标只回显、断电就丢
+- 命令回包可能混着按键/配置切换事件；必须校验 `report id + 命令族 + 子命令`，不能拿到第一个包就当答案
+- 回报率编码为 `125→0, 250→1, 500→2, 1000→3`；月刃 AimPoint 本体最高 1000 Hz，2000 Hz 以上是别的接收器才支持，不能显示给用户
+- DPI 按 `(dpi - 50) / 50` 编码，小端；读取时每档 4 字节（X/Y 各 2 字节）
+- 按键是「源按键码 → 目标动作码」两个小端 16 位值，默认动作码等于源按键码
+
+设备 ID：有线 `0x1A66`、2.4G `0x1A68`、蓝牙 `0x1A6A`、Omni 接收器 `0x1ACE`。控制接口在 `MI_00`；Omni 接收器在 `MI_02&Col03`。
+
 ### 蓝牙耳机：未公开的 PnP 属性
 
 Windows 蓝牙协议栈在收到耳机通过 HFP 上报的电量后，会把它写入一个未公开的设备属性：
@@ -153,10 +175,26 @@ Windows 把电量写进设备节点后**不会清除**。耳机关机、超出�
 | 类型 | 说明 |
 |------|------|
 | 雷蛇无线鼠标 | 设备表共 65 个型号，transaction id 取自 OpenRazer 设备库 |
+| ROG 月刃无线 AimPoint | 有线、2.4G 接收器、Omni 接收器和蓝牙连接；USB/2.4G 下可读写电量与参数 |
+| 罗技无线鼠标 / 键盘 | HID++ 2.0，支持 Unifying/Bolt 接收器下多设备；只读电量 |
+| ATK / VXE / VGN 无线鼠标 | 两种 Nordic 方案，只读电量 |
+| VXE V75 Pro 无线键盘 | 从厂商状态通知读取电量，只读 |
+| Endgame Gear / VAXEE / ZYGEN | 2.4G 接收器，只读电量 |
+| Nordic nRF 方案无线设备 | 通用 2.4G 接收器，只读电量 |
 | 蓝牙耳机 | 通过 HFP 上报电量的设备（Sony、WH-CH720N 等） |
 | 蓝牙手柄 / 键鼠 | 可在**设置窗口**里勾选开启 |
 
-默认只显示鼠标和耳机，手柄和键盘要在设置里打开。
+默认只显示鼠标和耳机，手柄和键盘要在设置里打开。新增品牌目前只读取电量；DPI、回报率和改键仍只对雷蛇和 ROG 月刃开放。
+
+### 罗技 HID++ 2.0
+
+罗技无线设备通过厂商 HID 接口上的 HID++ 2.0 功能表查询电量。程序会先找 `0x1000`（电量状态），再找 `0x1004`（统一电量），最后用 `0x1001`（电压）按锂电曲线估算百分比。接收器上的每台设备用 1–6 号设备索引区分，名字从 `0x0005` 读取。
+
+### 其他 2.4G 品牌
+
+ATK/VXE/VGN、Endgame Gear、VAXEE/ZYGEN 和 Nordic nRF 方案的协议定义集中在 `batterytray/drivers/hidvendor.py`，按「VID + usage page」精确匹配，不会误开其他厂商的接口。只发读电量命令，不写任何设置。
+
+VXE V75 Pro 键盘例外：它使用 `320F:5088` 的 `0xFF1C` 厂商集合，请求报文是 64 字节的 `04 .. .. 1A 06`；回复里第 8 字节是电量、第 9 字节是充电状态。键盘休眠时会短暂不响应，按一下键盘再刷新即可。
 
 ### 设备类型是怎么判断的
 
@@ -262,6 +300,10 @@ batterytray/
 └── drivers/
     ├── razer.py      # 雷蛇 HID feature report（读电量）
     ├── mouseconfig.py # 雷蛇鼠标参数（DPI、回报率、挡位、按键映射）
+    ├── asusmouse.py  # ROG 鼠标 HID 协议（电量、DPI、回报率、按键）
+    ├── mouseadapter.py # 把不同厂商驱动包成同一套接口
+    ├── logitech.py   # 罗技 HID++ 2.0 电量（鼠标 / 键盘）
+    ├── hidvendor.py  # ATK/VXE、Endgame、VAXEE、Nordic 电量协议
     └── bluetooth.py  # 蓝牙 PnP 电量属性
 ```
 
@@ -271,7 +313,7 @@ batterytray/
 .venv\Scripts\python -m pytest verify_all.py -q
 ```
 
-160+ 个用例，覆盖协议编解码、CRC、图标渲染、配置读写、设备筛选与去重、Class of Device 分类、离线设备的电量屏蔽、离线设备的显示位置、设置窗口、重命名、单实例、开机自启和轮询循环。其中几个用例会直接读取你机器上真实连接的设备。
+180+ 个用例，覆盖协议编解码、CRC、图标渲染、配置读写、设备筛选与去重、Class of Device 分类、离线设备的电量屏蔽、离线设备的显示位置、设置窗口、重命名、单实例、开机自启和轮询循环。其中几个用例会直接读取你机器上真实连接的设备。
 
 ## 已知限制
 
@@ -280,7 +322,8 @@ batterytray/
 - 蓝牙设备离线时不会显示电量（显示「未连接」）；重新开机后需要等耳机上报一次电量才会恢复
 - 电量显示的是原始刻度换算值，实际可能有 ±2% 误差
 - 雷蛇耳机（Kraken / BlackShark）使用独立的厂商协议，未纳入本版本
-- 鼠标参数目前只对雷蛇鼠标有效；其他品牌的鼠标只会显示电量
+- ROG 鼠标的参数设置只在 USB 有线或 2.4G 接收器下有效；蓝牙模式使用 BLE HID，Windows 不暴露厂商控制接口
+- ROG 月刃 AimPoint 本体最高 1000 Hz；2000 Hz 以上只属于其他带 booster 接收器的型号
 - 回报率上限取决于连接方式：有线 1000 Hz，2000 Hz 以上需要 HyperPolling 接收器
 
 ## 参考项目
@@ -293,6 +336,11 @@ batterytray/
 - [yszyszysz233/2.4G-battery-viewer](https://github.com/yszyszysz233/2.4G-battery-viewer) —— Hands-Free 节点属性的关键说明
 - [1972863663/Viper-Control-Lite](https://github.com/1972863663/Viper-Control-Lite) —— MIT 协议的毒蝰 V3 Pro 参数工具，DPI 与回报率命令的参考实现
 - [MatthewSaintBull/freenapse](https://github.com/MatthewSaintBull/freenapse) —— 专门针对毒蝰 V3 Pro 的开源工具，鼠标休眠问题的踩坑记录很有价值
+- [seerge/g-helper](https://github.com/seerge/g-helper) —— ROG 鼠标 HID 协议的主要参考，覆盖 30 多款华硕鼠标，已在真机验证
+- [pwr-Solaar/Solaar](https://github.com/pwr-Solaar/Solaar) —— 罗技 HID++ 2.0 电量、充电状态和设备名称的协议来源
+- [yszyszysz233/2.4G-battery-viewer](https://github.com/yszyszysz233/2.4G-battery-viewer) —— ATK/VXE、Endgame、VAXEE、Nordic 等 2.4G 电量协议
+- [CalcProgrammer1/OpenRGB](https://gitlab.com/CalcProgrammer1/OpenRGB/-/merge_requests/2316) —— 月刃 AimPoint 的 VID/PID 与灯效命令参考
+- [kyokenn/hid-asus-mouse](https://github.com/kyokenn/hid-asus-mouse) —— Linux 下的华硕鼠标按键驱动，用于交叉验证按键码
 - [uncoil 协议笔记](https://uncoil.justinthevoid.com/docs/protocol/) —— 最完整的 Razer 命令目录，含按键映射与 DPI 挡位；按键的 `fnIdEnum` 和「恢复默认 = 函数 id 1 + 按键 id」这个写法都出自这里
 - [emilkowalski/skills](https://github.com/emilkowalski/skills) —— 界面与动效的设计规范，`apple-design` 一节讲了苹果界面的材质分层
 - [nya-owo/cloudy](https://github.com/nya-owo/cloudy) —— 液态玻璃着色器的参考实现；本项目最终没有采用，电池图标改用了简洁的平面样式

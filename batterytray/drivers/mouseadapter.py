@@ -102,8 +102,10 @@ class MouseAdapter:
             dpi=settings.dpi_stages[0].dpi_x if settings.dpi_stages else 0,
             polling_rate=settings.polling_rate,
             stages=stages,
-            active_stage=settings.active_dpi_stage,
-            supported_rates=tuple(sorted(asusmouse.POLLING_RATES)),
+            # The ASUS protocol counts DPI stages from one, the common
+            # interface from zero.
+            active_stage=max(0, settings.active_dpi_stage - 1),
+            supported_rates=asusmouse.SUPPORTED_POLLING_RATES,
             has_stages=bool(settings.dpi_stages),
         )
 

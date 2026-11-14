@@ -1,0 +1,177 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.15, pytest-9.2.0, pluggy-1.7.0 -- D:\Desktop\a\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Desktop\a
+collecting ... collected 181 items
+
+verify_all.py::test_report_layout_is_ninety_one_bytes PASSED             [  0%]
+verify_all.py::test_request_carries_the_battery_command PASSED           [  1%]
+verify_all.py::test_request_crc_covers_the_right_bytes PASSED            [  1%]
+verify_all.py::test_crc_rejects_a_corrupted_response PASSED              [  2%]
+verify_all.py::test_viper_v3_pro_is_in_the_device_map PASSED             [  2%]
+verify_all.py::test_device_map_entries_are_well_formed PASSED            [  3%]
+verify_all.py::test_status_codes_map_to_the_openrazer_values PASSED      [  3%]
+verify_all.py::test_mouse_config_request_layout PASSED                   [  4%]
+verify_all.py::test_mouse_config_request_crc_is_valid PASSED             [  4%]
+verify_all.py::test_dpi_write_uses_a_different_transaction_id PASSED     [  5%]
+verify_all.py::test_polling_rate_codes_match_openrazer PASSED            [  6%]
+verify_all.py::test_wired_mouse_does_not_offer_high_polling_rates PASSED [  6%]
+verify_all.py::test_wireless_mouse_offers_the_hyperpolling_rates PASSED  [  7%]
+verify_all.py::test_dpi_stage_rejects_a_value_out_of_range PASSED        [  7%]
+verify_all.py::test_button_function_names_exist PASSED                   [  8%]
+verify_all.py::test_the_default_mapping_is_the_button_code PASSED        [  8%]
+verify_all.py::test_a_mapping_is_only_default_when_it_matches PASSED     [  9%]
+verify_all.py::test_resetting_a_button_writes_the_default PASSED         [  9%]
+verify_all.py::test_resetting_all_buttons_covers_every_button PASSED     [ 10%]
+verify_all.py::test_assigning_a_button_code_writes_the_code_in_the_data PASSED [ 11%]
+verify_all.py::test_the_label_of_a_button_code_names_the_button PASSED   [ 11%]
+verify_all.py::test_every_assignable_button_code_has_a_name PASSED       [ 12%]
+verify_all.py::test_the_asus_packet_has_the_right_header PASSED          [ 12%]
+verify_all.py::test_the_asus_packet_uses_the_report_id_of_the_connection PASSED [ 13%]
+verify_all.py::test_the_asus_packet_size_matches_the_interface PASSED    [ 13%]
+verify_all.py::test_the_asus_dpi_encoding_round_trips PASSED             [ 14%]
+verify_all.py::test_the_asus_dpi_is_written_little_endian PASSED         [ 14%]
+verify_all.py::test_the_asus_dpi_is_read_little_endian PASSED            [ 15%]
+verify_all.py::test_the_asus_default_action_is_the_button_code PASSED    [ 16%]
+verify_all.py::test_an_asus_mapping_is_only_default_when_it_matches PASSED [ 16%]
+verify_all.py::test_every_asus_write_is_saved PASSED                     [ 17%]
+verify_all.py::test_the_asus_button_mapping_is_written_in_the_right_order PASSED [ 17%]
+verify_all.py::test_an_asus_button_can_be_set_to_another_mouse_button PASSED [ 18%]
+verify_all.py::test_the_asus_button_mapping_is_read_from_the_right_offset PASSED [ 18%]
+verify_all.py::test_resetting_all_asus_buttons_covers_every_button PASSED [ 19%]
+verify_all.py::test_every_asus_button_code_has_a_name PASSED             [ 19%]
+verify_all.py::test_every_asus_assignable_code_has_a_name PASSED         [ 20%]
+verify_all.py::test_the_asus_polling_rates_are_the_supported_ones PASSED [ 20%]
+verify_all.py::test_the_asus_control_interface_is_the_vendor_collection PASSED [ 21%]
+verify_all.py::test_the_omni_receiver_uses_the_third_collection PASSED   [ 22%]
+verify_all.py::test_the_asus_transport_skips_events_until_the_answer PASSED [ 22%]
+verify_all.py::test_the_asus_error_answer_is_reported_as_unsupported PASSED [ 23%]
+verify_all.py::test_the_asus_mouse_is_recognised_by_its_name PASSED      [ 23%]
+verify_all.py::test_every_option_has_a_kind PASSED                       [ 24%]
+verify_all.py::test_the_asus_options_offer_the_default_reset PASSED      [ 24%]
+verify_all.py::test_the_adapter_turns_the_vendor_errors_into_one_kind PASSED [ 25%]
+verify_all.py::test_the_adapter_reads_the_asus_settings PASSED           [ 25%]
+verify_all.py::test_the_adapter_reads_the_razer_settings PASSED          [ 26%]
+verify_all.py::test_the_razer_settings_have_an_active_stage PASSED       [ 27%]
+verify_all.py::test_the_adapter_names_the_buttons_of_the_vendor PASSED   [ 27%]
+verify_all.py::test_the_stages_are_written_before_the_dpi PASSED         [ 28%]
+verify_all.py::test_a_dpi_outside_the_stages_is_kept PASSED              [ 28%]
+verify_all.py::test_the_factory_defaults_are_the_same_for_both_vendors PASSED [ 29%]
+verify_all.py::test_the_razer_factory_reset_writes_every_part PASSED     [ 29%]
+verify_all.py::test_the_asus_factory_reset_writes_every_part PASSED      [ 30%]
+verify_all.py::test_the_asus_factory_reset_writes_no_more_stages_than_the_mouse_has PASSED [ 30%]
+verify_all.py::test_the_adapter_forwards_the_factory_reset PASSED        [ 31%]
+verify_all.py::test_the_adapter_turns_the_factory_reset_errors_into_one_kind PASSED [ 32%]
+verify_all.py::test_the_mouse_dialog_offers_a_factory_reset PASSED       [ 32%]
+verify_all.py::test_level_colours_follow_the_thresholds PASSED           [ 33%]
+verify_all.py::test_fill_grows_with_the_level PASSED                     [ 33%]
+verify_all.py::test_icon_is_a_lightning_bolt PASSED                      [ 34%]
+verify_all.py::test_icon_is_visible_at_the_notification_area_size PASSED [ 34%]
+verify_all.py::test_charging_uses_the_charging_colour PASSED             [ 35%]
+verify_all.py::test_multi_device_icon_draws_every_device PASSED          [ 35%]
+verify_all.py::test_icon_has_transparent_background PASSED               [ 36%]
+verify_all.py::test_device_icon_draws_a_ring_around_the_device PASSED    [ 37%]
+verify_all.py::test_device_icon_ring_colour_follows_the_level PASSED     [ 37%]
+verify_all.py::test_device_icon_uses_the_device_kind PASSED              [ 38%]
+verify_all.py::test_tooltip_stays_within_the_windows_limit PASSED        [ 38%]
+verify_all.py::test_tooltip_lists_every_device PASSED                    [ 39%]
+verify_all.py::test_tooltip_handles_an_empty_list PASSED                 [ 39%]
+verify_all.py::test_config_round_trips PASSED                            [ 40%]
+verify_all.py::test_config_ignores_unknown_keys PASSED                   [ 40%]
+verify_all.py::test_config_survives_a_corrupt_file PASSED                [ 41%]
+verify_all.py::test_poll_interval_is_clamped PASSED                      [ 41%]
+verify_all.py::test_collect_devices_prefers_mice_and_headsets PASSED     [ 42%]
+verify_all.py::test_collect_devices_can_include_other_peripherals PASSED [ 43%]
+verify_all.py::test_the_settings_choose_which_kinds_are_shown PASSED     [ 43%]
+verify_all.py::test_the_old_config_still_shows_mice_and_headsets PASSED  [ 44%]
+verify_all.py::test_the_disconnected_devices_are_shown_by_default PASSED [ 44%]
+verify_all.py::test_the_disconnected_setting_survives_a_config_roundtrip PASSED [ 45%]
+verify_all.py::test_the_disconnected_devices_can_be_hidden PASSED        [ 45%]
+verify_all.py::test_the_class_of_device_tells_a_mouse_from_a_gamepad PASSED [ 46%]
+verify_all.py::test_the_device_kind_comes_from_the_class_of_device PASSED [ 46%]
+verify_all.py::test_the_class_of_device_is_read_for_the_paired_devices PASSED [ 47%]
+verify_all.py::test_the_registry_holds_when_the_device_was_last_seen PASSED [ 48%]
+verify_all.py::test_the_gamepad_is_listed_when_its_kind_is_enabled PASSED [ 48%]
+verify_all.py::test_collect_devices_respects_a_name_whitelist PASSED     [ 49%]
+verify_all.py::test_mice_sort_before_other_peripherals PASSED            [ 49%]
+verify_all.py::test_razer_reads_the_viper_v3_pro PASSED                  [ 50%]
+verify_all.py::test_a_sleeping_razer_mouse_stays_in_the_list PASSED      [ 50%]
+verify_all.py::test_a_sleeping_razer_mouse_has_no_battery_level PASSED   [ 51%]
+verify_all.py::test_bluetooth_reads_a_headset PASSED                     [ 51%]
+verify_all.py::test_bluetooth_deduplicates_by_address PASSED             [ 52%]
+verify_all.py::test_bluetooth_reports_the_connection_state PASSED        [ 53%]
+verify_all.py::test_bluetooth_connection_flag_matches_the_property_store PASSED [ 53%]
+verify_all.py::test_a_fresh_battery_report_means_the_device_is_reachable PASSED [ 54%]
+verify_all.py::test_an_old_battery_report_means_the_device_is_gone PASSED [ 54%]
+verify_all.py::test_the_connection_flag_wins_over_the_last_seen_time PASSED [ 55%]
+verify_all.py::test_a_device_without_any_signal_is_assumed_to_be_connected PASSED [ 55%]
+verify_all.py::test_the_disconnect_moment_does_not_look_like_a_live_reading PASSED [ 56%]
+verify_all.py::test_the_wh_720n_is_not_reported_as_a_full_battery PASSED [ 56%]
+verify_all.py::test_disconnected_devices_do_not_show_a_battery_level PASSED [ 57%]
+verify_all.py::test_connected_devices_keep_their_battery_level PASSED    [ 58%]
+verify_all.py::test_the_tooltip_marks_disconnected_devices PASSED        [ 58%]
+verify_all.py::test_the_tooltip_only_lists_connected_devices PASSED      [ 59%]
+verify_all.py::test_connected_devices_filters_out_offline_ones PASSED    [ 59%]
+verify_all.py::test_single_instance_guard_blocks_a_second_holder PASSED  [ 60%]
+verify_all.py::test_autostart_round_trip PASSED                          [ 60%]
+verify_all.py::test_the_startup_shortcut_has_a_usable_target PASSED      [ 61%]
+verify_all.py::test_the_startup_target_is_the_executable_when_frozen PASSED [ 61%]
+verify_all.py::test_the_startup_target_quotes_the_script_when_running_from_source PASSED [ 62%]
+verify_all.py::test_refresh_wakes_the_loop_without_a_second_reader PASSED [ 62%]
+verify_all.py::test_stop_ends_the_loop PASSED                            [ 63%]
+verify_all.py::test_device_subtitle_falls_back_to_the_kind PASSED        [ 64%]
+verify_all.py::test_device_detail_rows_show_polling_rate_connection_status_and_dpi PASSED [ 64%]
+verify_all.py::test_device_detail_rows_leave_out_the_unknown_values PASSED [ 65%]
+verify_all.py::test_device_detail_rows_report_charging PASSED            [ 65%]
+verify_all.py::test_razer_connection_mode_reflects_the_product_name PASSED [ 66%]
+verify_all.py::test_window_posts_work_to_the_tkinter_thread PASSED       [ 66%]
+verify_all.py::test_the_mouse_dialog_hands_its_work_to_the_tkinter_thread PASSED [ 67%]
+verify_all.py::test_the_mouse_dialog_keeps_the_name_of_the_device PASSED [ 67%]
+verify_all.py::test_window_shows_a_card_for_every_device PASSED          [ 68%]
+verify_all.py::test_window_reports_an_empty_device_list PASSED           [ 69%]
+verify_all.py::test_dpi_scaling_helpers PASSED                           [ 69%]
+verify_all.py::test_quick_panel_shows_a_row_for_every_device PASSED      [ 70%]
+verify_all.py::test_quick_panel_marks_charging_devices PASSED            [ 70%]
+verify_all.py::test_quick_panel_hides_disconnected_devices PASSED        [ 71%]
+verify_all.py::test_main_window_still_shows_disconnected_devices PASSED  [ 71%]
+verify_all.py::test_quick_panel_toggles PASSED                           [ 72%]
+verify_all.py::test_quick_panel_stays_open_until_clicked_outside PASSED  [ 72%]
+verify_all.py::test_tray_menu_has_a_default_item_for_the_panel PASSED    [ 73%]
+Windows fatal exception: access violation
+
+Current thread 0x000087b0 (most recent call first):
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python313\Lib\tkinter\__init__.py", line 1479 in update
+  File "D:\Desktop\a\verify_all.py", line 2070 in test_quick_panel_does_not_grow_on_refresh
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\python.py", line 187 in pytest_pyfunc_call
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_execution.py", line 147 in _multicall
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_manager.py", line 183 in _hookexec
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_caller.py", line 197 in __call__
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\python.py", line 1798 in runtest
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_execution.py", line 147 in _multicall
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_manager.py", line 183 in _hookexec
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_caller.py", line 197 in __call__
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_execution.py", line 147 in _multicall
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_manager.py", line 183 in _hookexec
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_caller.py", line 197 in __call__
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\main.py", line 411 in pytest_runtestloop
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_execution.py", line 147 in _multicall
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_manager.py", line 183 in _hookexec
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_caller.py", line 197 in __call__
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\main.py", line 387 in _main
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\main.py", line 333 in wrap_session
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\main.py", line 380 in pytest_cmdline_main
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_execution.py", line 147 in _multicall
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_manager.py", line 183 in _hookexec
+  File "D:\Desktop\a\.venv\Lib\site-packages\pluggy\_caller.py", line 197 in __call__
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\config\__init__.py", line 262 in _main
+  File "D:\Desktop\a\.venv\Lib\site-packages\_pytest\config\__init__.py", line 286 in _console_main
+  File "D:\Desktop\a\.venv\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 203 in _run_module_as_main
+verify_all.py::test_quick_panel_does_not_grow_on_refresh 

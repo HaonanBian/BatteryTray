@@ -16,7 +16,7 @@ import pystray
 
 from . import autostart, singleton
 from .config import Config, config_dir
-from .drivers import asusmouse, bluetooth, razer
+from .drivers import asusmouse, bluetooth, hidvendor, logitech, razer
 from .icon import DeviceState, build_device_icon, build_icon
 
 
@@ -140,10 +140,34 @@ def collect_devices(config: Config) -> list[Device]:
             dpi=asus_device.dpi,
         ))
 
+    for logitech_device in logitech.read_devices():
+        devices.append(Device(
+            name=logitech_device.name,
+            percent=logitech_device.percent,
+            charging=logitech_device.charging,
+            kind=logitech_device.kind,
+            product_id=logitech_device.product_id,
+            connection=logitech_device.connection,
+            connected=logitech_device.connected,
+        ))
+
+    for vendor_device in hidvendor.read_devices():
+        devices.append(Device(
+            name=vendor_device.name,
+            percent=vendor_device.percent,
+            charging=vendor_device.charging,
+            kind=vendor_device.kind,
+            product_id=vendor_device.product_id,
+            connection=vendor_device.connection,
+            connected=vendor_device.connected,
+        ))
+
     for bt_device in bluetooth.read_devices():
-        # The Razer mouse also shows up as a Bluetooth device when paired; keep
-        # one entry per device by preferring the HID reading.
-        if any(d.kind == KIND_MOUSE and d.name.lower() in bt_device.name.lower()
+        # The same peripheral can be exposed through its HID receiver and
+        # through the Bluetooth stack. Keep the reading from the dedicated
+        # HID driver, which is the live one.
+        if any(d.kind == bt_device.kind
+               and d.name.lower() in bt_device.name.lower()
                for d in devices):
             continue
         connected = getattr(bt_device, "connected", True)

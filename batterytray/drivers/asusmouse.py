@@ -29,10 +29,10 @@ commands.
 
 References:
     seerge/g-helper              - the protocol implementation for
-                                    31 models, cross verified on hardware
-    aikunx/rog-mouse-liberation   - the protocol notes and the button
-                                    remap command
-    kyokenn/rogdrv               - the Linux driver, device table
+                                    30+ models, cross checked on hardware
+    CalcProgrammer1/OpenRGB      - the VID/PID table and lighting commands
+    kyokenn/hid-asus-mouse       - the Linux button driver, used to
+                                    cross check the button codes
 """
 
 from __future__ import annotations
@@ -62,8 +62,11 @@ ASUS_DEVICES: dict[int, str] = {
 # The control interface of the ASUS mice uses a vendor usage page.
 USAGE_PAGE_VENDOR = 0xFF01
 
-# The packet size of the ASUS protocol.
-PACKET_SIZE = 64
+# The packet size of the ASUS protocol. The direct connection uses a
+# 64-byte report plus the HID report id, the Omni receiver uses 64 bytes
+# including the id. This mirrors g-helper's USBPacketSize().
+PACKET_SIZE = 65
+OMNI_PACKET_SIZE = 64
 
 # The command families.
 FAMILY_READ = 0x12
@@ -91,7 +94,7 @@ MAX_DPI = 36000
 DPI_STAGE_COUNT = 4
 PROFILE_COUNT = 5
 
-# The polling rates the mouse supports, with their protocol values.
+# The polling rates the protocol knows, with their encoded values.
 POLLING_RATES: dict[int, int] = {
     125: 0,
     250: 1,
@@ -101,6 +104,11 @@ POLLING_RATES: dict[int, int] = {
     4000: 5,
     8000: 6,
 }
+
+# The Keris Aimpoint only reaches 1000 Hz on its own receiver. The higher
+# values need the special "booster" receiver, so they must not be offered
+# in the dialog for this mouse.
+SUPPORTED_POLLING_RATES: tuple[int, ...] = (125, 250, 500, 1000)
 
 # The button slots of the mouse, with the source code the protocol uses.
 #
@@ -237,13 +245,14 @@ def default_action_code(button_id: int) -> int:
     return button_id
 
 
-def _build_packet(report_id: int, family: int, *args: int) -> bytes:
+def _build_packet(report_id: int, family: int, *args: int,
+                  size: int = PACKET_SIZE) -> bytes:
     """Builds one protocol packet."""
-    packet = bytearray(PACKET_SIZE)
+    packet = bytearray(size)
     packet[0] = report_id
     packet[1] = family
     for i, value in enumerate(args):
-        if 2 + i >= PACKET_SIZE:
+        if 2 + i >= size:
             break
         packet[2 + i] = value & 0xFF
     return bytes(packet)
@@ -252,12 +261,17 @@ def _build_packet(report_id: int, family: int, *args: int) -> bytes:
 class AsusMouseController:
     """Reads and writes the configuration of one ASUS ROG mouse."""
 
+    # The direct connection is the common case. The constructor overrides
+    # this for the Omni receiver.
+    packet_size = PACKET_SIZE
+
     def __init__(self, path: bytes | str, product_id: int, name: str,
                  report_id: int = 0x00):
         self.path = path
         self.product_id = product_id
         self.name = name
         self.report_id = report_id
+        self.packet_size = _packet_size_for(product_id)
         self._handle: hid.device | None = None
         try:
             handle = hid.device()
@@ -270,35 +284,74 @@ class AsusMouseController:
     # Low level transport
     # ------------------------------------------------------------------
 
+    def _discard_pending(self) -> None:
+        """Drops reports that are already waiting in the input queue.
+
+        The control interface also receives button and profile events. If
+        one of them is still queued when a command is sent, the next read
+        would return the event instead of the answer. Draining first keeps
+        the command and the answer together.
+        """
+        if self._handle is None:
+            return
+        for _ in range(8):
+            try:
+                pending = self._handle.read(self.packet_size, timeout_ms=1)
+            except OSError:
+                return
+            if not pending:
+                return
+
     def _exchange(self, packet: bytes, label: str) -> bytes | None:
-        """Sends a packet and waits for the answer."""
+        """Sends a packet and waits for the matching answer.
+
+        A read may return an event report before the answer. Such reports
+        are skipped by comparing the header with the command that was
+        sent, which is what g-helper does as well.
+        """
         if self._handle is None:
             raise AsusMouseError("鼠标没有连接")
+
+        self._discard_pending()
         try:
             self._handle.write(packet)
         except OSError as exc:
             raise AsusMouseError(f"{label}失败：{exc}") from exc
 
+        empty = False
         for _ in range(25):
             time.sleep(0.02)
             try:
-                answer = self._handle.read(PACKET_SIZE, timeout_ms=50)
+                answer = self._handle.read(self.packet_size, timeout_ms=50)
             except OSError as exc:
                 raise AsusMouseError(f"{label}失败：{exc}") from exc
-            if not answer or len(answer) < 3:
+            if not answer:
                 continue
-            if answer[0] == 0xFF and answer[1] == 0xAA:
-                # The mouse did not understand the command.
+            data = bytes(answer)
+            if len(data) < 4:
+                continue
+            # The mouse answers with the report id, the command family and
+            # the sub command. An error is answered with FF AA instead.
+            if data[1] == 0xFF and data[2] == 0xAA:
                 raise AsusMouseError(f"{label}失败：这个固件不支持该命令")
-            if answer[1] == 0 and answer[2] == 0:
-                raise AsusMouseAsleep(f"{label}失败：鼠标没有响应")
-            return bytes(answer)
+            if data[1] == 0 and data[2] == 0 and data[3] == 0:
+                # The mouse is asleep; it acknowledges with an empty report.
+                empty = True
+                continue
+            if (data[0] != self.report_id or data[1] != packet[1]
+                    or data[2] != packet[2]):
+                # A button/profile event or an answer to an older command.
+                continue
+            return data
 
+        if empty:
+            raise AsusMouseAsleep(f"{label}失败：鼠标没有响应")
         raise AsusMouseError(f"{label}失败：鼠标没有响应")
 
     def _read(self, *args: int, label: str) -> bytes:
         """Sends a read command and returns the answer."""
-        packet = _build_packet(self.report_id, FAMILY_READ, *args)
+        packet = _build_packet(self.report_id, FAMILY_READ, *args,
+                               size=self.packet_size)
         answer = self._exchange(packet, label)
         if answer is None:
             raise AsusMouseError(f"{label}失败：鼠标没有响应")
@@ -306,7 +359,8 @@ class AsusMouseController:
 
     def _write(self, *args: int, label: str) -> None:
         """Sends a write command and saves the settings."""
-        packet = _build_packet(self.report_id, FAMILY_WRITE, *args)
+        packet = _build_packet(self.report_id, FAMILY_WRITE, *args,
+                               size=self.packet_size)
         self._exchange(packet, label)
         self.save()
 
@@ -316,7 +370,8 @@ class AsusMouseController:
         Without this command the mouse only echoes the write back and
         forgets it as soon as it is unplugged.
         """
-        packet = _build_packet(self.report_id, FAMILY_PROFILE, 0x03)
+        packet = _build_packet(self.report_id, FAMILY_PROFILE, 0x03,
+                               size=self.packet_size)
         self._exchange(packet, "保存设置")
 
     # ------------------------------------------------------------------
@@ -330,7 +385,8 @@ class AsusMouseController:
         ones which report a raw value.
         """
         answer = self._read(SUB_BATTERY, label="读取电量")
-        if answer[1] != FAMILY_READ or answer[2] != SUB_BATTERY:
+        if (len(answer) < 11 or answer[1] != FAMILY_READ
+                or answer[2] != SUB_BATTERY):
             raise AsusMouseError("读取电量失败：回答的不是电量命令")
         return answer[5], answer[10] > 0
 
@@ -346,7 +402,8 @@ class AsusMouseController:
         the value is stored in steps of 50 starting at 50.
         """
         answer = self._read(SUB_SETTING, SUB_DPI_XY, label="读取 DPI")
-        if answer[1] != FAMILY_READ or answer[2] != SUB_SETTING:
+        if (len(answer) < 6 or answer[1] != FAMILY_READ
+                or answer[2] != SUB_SETTING):
             raise AsusMouseError("读取 DPI 失败：回答的不是 DPI 命令")
         if answer[3] != SUB_DPI_XY:
             raise AsusMouseError("读取 DPI 失败：回答的不是 X/Y DPI 命令")
@@ -390,7 +447,8 @@ class AsusMouseController:
     def get_polling_rate(self) -> int:
         """Reads the polling rate in Hz."""
         answer = self._read(SUB_SETTING, 0x00, label="读取回报率")
-        if answer[1] != FAMILY_READ or answer[2] != SUB_SETTING:
+        if (len(answer) < 14 or answer[1] != FAMILY_READ
+                or answer[2] != SUB_SETTING or answer[3] != 0x00):
             raise AsusMouseError("读取回报率失败：回答的不是回报率命令")
         raw = answer[13] & 0x07
         for rate, code in POLLING_RATES.items():
@@ -425,7 +483,8 @@ class AsusMouseController:
         """
         answer = self._read(SUB_BUTTONS, 0x00, 0x00, 0x00,
                             label="读取按键映射")
-        if answer[1] != FAMILY_READ or answer[2] != SUB_BUTTONS:
+        if (len(answer) < 6 or answer[1] != FAMILY_READ
+                or answer[2] != SUB_BUTTONS):
             raise AsusMouseError("读取按键映射失败：回答的不是按键命令")
 
         slot = BUTTON_ORDER.index(button_id) \
@@ -488,7 +547,8 @@ class AsusMouseController:
     def get_profile(self) -> tuple[int, int]:
         """Reads the active profile and the active DPI stage."""
         answer = self._read(SUB_DEVICE_INFO, label="读取配置文件")
-        if answer[1] != FAMILY_READ or answer[2] != SUB_DEVICE_INFO:
+        if (len(answer) < 13 or answer[1] != FAMILY_READ
+                or answer[2] != SUB_DEVICE_INFO or answer[3] != 0x00):
             raise AsusMouseError("读取配置文件失败：回答的不是设备信息命令")
         return answer[11], answer[12]
 
@@ -497,7 +557,8 @@ class AsusMouseController:
         if profile < 0 or profile >= PROFILE_COUNT:
             raise AsusMouseError(
                 f"配置文件 {profile} 不在 0-{PROFILE_COUNT - 1} 之间")
-        packet = _build_packet(self.report_id, FAMILY_PROFILE, 0x02, profile)
+        packet = _build_packet(self.report_id, FAMILY_PROFILE, 0x02, profile,
+                               size=self.packet_size)
         self._exchange(packet, f"切换到配置文件 {profile}")
         self.save()
 
@@ -566,11 +627,13 @@ class AsusMouseController:
                 if index >= len(settings.dpi_stages):
                     break
                 actual = settings.dpi_stages[index]
-                if actual.dpi_x != stage.dpi_x or actual.dpi_y != stage.dpi_y:
+                # The write command carries one DPI value and the mouse
+                # applies it to both axes. Only the X value can be
+                # verified; the Y bytes are informational.
+                if actual.dpi_x != stage.dpi_x:
                     raise AsusMouseError(
                         f"第 {index + 1} 档 DPI 写入后回读不一致："
-                        f"目标 {stage.dpi_x}/{stage.dpi_y}，"
-                        f"实际 {actual.dpi_x}/{actual.dpi_y}")
+                        f"目标 {stage.dpi_x}，实际 {actual.dpi_x}")
         return settings
 
     def close(self) -> None:
@@ -589,21 +652,63 @@ class AsusMouseController:
         self.close()
 
 
+def _path_text(path: bytes | str) -> str:
+    """Returns a HID path as lower case text."""
+    if isinstance(path, bytes):
+        path = path.decode("utf-8", errors="replace")
+    return path.lower()
+
+
+def _is_control_interface(dev: dict) -> bool:
+    """Whether an ASUS HID interface is the one that carries commands.
+
+    The direct connection exposes the control collection as ``MI_00``;
+    the Omni receiver multiplexes it on ``MI_02&Col03``. Filtering only by
+    the vendor usage page is fragile because some ASUS keyboards use a
+    vendor page too, so the known mouse product ids are checked first.
+    """
+    product_id = dev.get("product_id")
+    if product_id not in ASUS_DEVICES:
+        return False
+
+    path = _path_text(dev.get("path", ""))
+    if product_id == PRODUCT_OMNI_RECEIVER:
+        if "mi_02&col03" in path:
+            return True
+    elif "mi_00" in path:
+        return True
+
+    # A HID path with a collection belongs to a known mouse, but not to
+    # the control channel; do not fall back to the usage page for those.
+    if "mi_" in path or "&col" in path:
+        return False
+
+    # Older firmware and the wired variants keep the collection on the
+    # vendor page; this fallback still finds those.
+    return (dev.get("usage_page") == USAGE_PAGE_VENDOR
+            and dev.get("usage") == 1)
+
+
 def _candidate_interfaces() -> list[dict]:
     """Lists the ASUS HID interfaces that can carry the settings."""
     candidates = []
     for dev in hid.enumerate(ASUS_VID):
-        if dev["vendor_id"] != ASUS_VID:
+        if dev.get("vendor_id") != ASUS_VID:
             continue
-        # The control interface of the ASUS mice uses a vendor usage
-        # page. The other interfaces carry the keyboard and the mouse
-        # reports.
-        if dev.get("usage_page") != USAGE_PAGE_VENDOR:
-            continue
-        if dev.get("usage") != 1:
+        if not _is_control_interface(dev):
             continue
         candidates.append(dev)
-    candidates.sort(key=lambda d: (d["interface_number"], d["product_id"]))
+
+    def rank(dev: dict) -> tuple[int, int, int]:
+        path = _path_text(dev.get("path", ""))
+        if dev.get("product_id") == PRODUCT_OMNI_RECEIVER:
+            preferred = 0 if "mi_02&col03" in path else 1
+        else:
+            preferred = 0 if "mi_00" in path else 1
+        return (preferred, dev.get("interface_number", 0),
+                dev.get("product_id", 0))
+
+    candidates.sort(key=rank)
     return candidates
 
 
@@ -614,6 +719,18 @@ def _report_id_for(product_id: int) -> int:
     direct cable connection uses ``0x00``.
     """
     return 0x03 if product_id == PRODUCT_OMNI_RECEIVER else 0x00
+
+
+def _packet_size_for(product_id: int) -> int:
+    """The HID report size of the control interface.
+
+    The direct interface accepts a 64-byte report and carries the report
+    id in front of it (65 bytes in total). The Omni receiver's report is
+    64 bytes including the id. Both values come from g-helper, which is
+    tested against the real devices.
+    """
+    return OMNI_PACKET_SIZE if product_id == PRODUCT_OMNI_RECEIVER \
+        else PACKET_SIZE
 
 
 def _device_name(product_id: int, product_string: str) -> str:
@@ -656,8 +773,10 @@ class AsusDevice:
 def read_devices() -> list[AsusDevice]:
     """Reads the battery level of every connected ASUS mouse.
 
-    Only the USB connection reports the battery level. A mouse behind
-    Bluetooth shows up through the Windows device manager instead.
+    The control interface is only available over USB or the 2.4 GHz
+    receiver. In Bluetooth mode Windows exposes the mouse as a BLE HID
+    device instead, which the HID driver cannot reach; the Bluetooth
+    driver reports that connection separately.
     """
     found: list[AsusDevice] = []
     seen: set[tuple[int, str]] = set()
@@ -681,53 +800,46 @@ def read_devices() -> list[AsusDevice]:
         except AsusMouseError:
             continue
 
+        # One handle is enough for all reads. Opening a second one while
+        # the first is still open can fail because the control interface
+        # is exclusive on some firmware versions.
         try:
-            percent, charging = controller.get_battery()
-        except AsusMouseError:
-            continue
-        finally:
-            name = controller.name
-            controller.close()
+            try:
+                percent, charging = controller.get_battery()
+            except AsusMouseError:
+                continue
+            if percent <= 0:
+                # A zero reading usually means the mouse is asleep rather
+                # than genuinely empty.
+                continue
 
-        if percent <= 0:
-            # A zero reading usually means the mouse is asleep rather
-            # than genuinely empty.
-            continue
-
-        # The polling rate and the DPI are read with the same handle. A
-        # mouse that does not answer them is still shown, it just does not
-        # report those two values.
-        polling_rate = 0
-        dpi = 0
-        try:
-            controller = AsusMouseController(
-                path, product_id,
-                _device_name(product_id, dev.get("product_string") or ""),
-                _report_id_for(product_id))
-        except AsusMouseError:
-            controller = None
-        if controller is not None:
+            # The polling rate and the DPI are optional: a mouse that does
+            # not answer them is still shown, it just does not report the
+            # two values.
+            polling_rate = 0
             try:
                 polling_rate = controller.get_polling_rate()
             except AsusMouseError:
-                polling_rate = 0
+                pass
+            dpi = 0
             try:
                 stages = controller.get_dpi_stages()
             except AsusMouseError:
                 stages = []
-            controller.close()
             if stages:
                 dpi = stages[0].dpi_x
 
-        found.append(AsusDevice(
-            name=name,
-            percent=min(100, percent),
-            charging=charging,
-            product_id=product_id,
-            connection=_connection_label(product_id),
-            polling_rate=polling_rate,
-            dpi=dpi,
-        ))
+            found.append(AsusDevice(
+                name=controller.name,
+                percent=min(100, percent),
+                charging=charging,
+                product_id=product_id,
+                connection=_connection_label(product_id),
+                polling_rate=polling_rate,
+                dpi=dpi,
+            ))
+        finally:
+            controller.close()
 
     return found
 

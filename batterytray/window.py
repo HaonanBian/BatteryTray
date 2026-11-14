@@ -165,7 +165,7 @@ class BatteryWindow(tk.Tk):
         brand.pack(side="left", padx=s(18), pady=s(9))
         tk.Label(brand, text="BatteryTray", bg=BG, fg=FG,
                  font=(self.family, fp(15), "bold")).pack(anchor="w")
-        tk.Label(brand, text="鼠标与耳机电量", bg=BG, fg=FG_MUTED,
+        tk.Label(brand, text="鼠标、键盘与耳机电量", bg=BG, fg=FG_MUTED,
                  font=(self.family, fp(9))).pack(anchor="w", pady=(s(1), 0))
 
         self.header_status = tk.Label(header, text="", bg=BG, fg=FG_DIM,

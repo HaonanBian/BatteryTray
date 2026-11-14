@@ -27,6 +27,8 @@ a = Analysis(
         "batterytray.drivers.asusmouse",
         "batterytray.drivers.mouseadapter",
         "batterytray.drivers.bluetooth",
+        "batterytray.drivers.logitech",
+        "batterytray.drivers.hidvendor",
         "win10toast",
     ],
     hookspath=[],

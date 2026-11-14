@@ -1,6 +1,6 @@
 # BatteryTray 功能介绍
 
-> Windows 托盘电量显示工具 —— 让鼠标和耳机的电量一眼可见，不再靠猜。
+> Windows 托盘电量显示工具 —— 让鼠标、键盘和耳机的电量一眼可见，不再靠猜。
 
 ![托盘图标](assets/batterytray.png)
 
@@ -83,6 +83,12 @@ BatteryTray 常驻在 Windows 系统托盘，为每台在线设备显示一个**
 | 类型 | 说明 |
 |------|------|
 | 雷蛇无线鼠标 | 设备表共 **65 个型号**，transaction id 取自 OpenRazer 设备库 |
+| ROG 月刃无线 AimPoint | 有线 / 2.4G / Omni / 蓝牙；USB 和 2.4G 下可读电量并修改 DPI、回报率、按键 |
+| 罗技无线鼠标 / 键盘 | HID++ 2.0，支持 Unifying/Bolt 接收器多设备，只读电量 |
+| ATK / VXE / VGN 无线鼠标 | 两种 Nordic 方案，只读电量 |
+| VXE V75 Pro 无线键盘 | 厂商状态通知，只读电量 |
+| Endgame Gear / VAXEE / ZYGEN | 2.4G 接收器，只读电量 |
+| Nordic nRF 方案无线设备 | 通用 2.4G 接收器，只读电量 |
 | 蓝牙耳机 | 通过 HFP 上报电量的设备（Sony、WH-CH720N 等） |
 | 蓝牙手柄 / 键鼠 | 可在**设置窗口**里勾选开启 |
 
@@ -99,6 +105,12 @@ BatteryTray 常驻在 Windows 系统托盘，为每台在线设备显示一个**
 **关键实现细节**：Windows 的 `mouclass` 驱动在鼠标使用期间会持有独占锁，用读写方式打开设备会得到 `ERROR_ACCESS_DENIED`。必须用 `desired_access = 0` 打开句柄才能发送 feature report —— 这是 [`damianyoko/viper-tray`](https://github.com/damianyoko/viper-tray) 和 [`nuxencs/razertray`](https://github.com/nuxencs/razertray) 都采用的绕过方式。
 
 毒蝰 V3 Pro 的设备 ID：USB 有线 `PID 0x00C0`，无线接收器 `PID 0x00C1`，transaction id 为 `0x1F`。
+
+### ROG 鼠标：原生 HID 协议
+
+ROG 月刃无线 AimPoint 使用另一套 64 字节负载的 HID 报文，协议实现参考 [`seerge/g-helper`](https://github.com/seerge/g-helper)。`0x12` 读、`0x51` 写、`0x50` 配置/保存，每次写入后必须发 `0x50 0x03` 落盘。回包里会混入按键事件，读取时按 `report id + 命令族 + 子命令` 过滤。
+
+设备 ID：有线 `0x1A66`、2.4G `0x1A68`、蓝牙 `0x1A6A`、Omni `0x1ACE`。控制接口在 `MI_00`，Omni 在 `MI_02&Col03`。本体回报率上限 1000 Hz，2000 Hz 以上属于其他接收器型号。
 
 ### 蓝牙耳机：未公开的 PnP 属性
 
