@@ -39,6 +39,10 @@ class Config:
     # Draw one battery per device instead of only the device with the lowest
     # charge.
     show_every_device: bool = True
+    # Hide the devices that are known but not currently reachable. They
+    # still show up in the tray tooltip and the quick panel, only the
+    # device list leaves them out.
+    hide_disconnected: bool = False
     # Warn once when a device drops to this level.
     low_battery_threshold: int = 20
     # Notify when a device crosses the threshold.

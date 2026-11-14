@@ -268,6 +268,15 @@ class RazerDevice:
     percent: int
     charging: bool
     connection: str = ""
+    # The polling rate the mouse is set to, in Hz. Zero when the mouse did
+    # not answer the query.
+    polling_rate: int = 0
+    # The DPI the mouse is set to. Zero when the mouse did not answer.
+    dpi: int = 0
+    # ``False`` when the device did not answer, because it went to sleep or
+    # is switched off. Such a device is still shown in the list, but without
+    # a battery level.
+    connected: bool = True
 
 
 def _device_name(product_id: int, product_string: str) -> str:
@@ -321,8 +330,12 @@ def _transaction_id_for(handle: _HidHandle, product_id: int) -> int | None:
 def read_devices() -> list[RazerDevice]:
     """Reads battery level from every connected Razer device.
 
-    Returns one entry per device that answered. Devices that are asleep or
-    simply absent are skipped.
+    A wireless mouse goes to sleep after a while and then stops answering
+    the HID commands, while the dongle it is plugged into still shows up.
+    Such a device is returned with ``connected=False``, so it can be shown
+    in the list as "not connected" instead of disappearing from it.
+
+    Devices that are simply absent are skipped.
     """
     found: dict[tuple[int, str], RazerDevice] = {}
 
@@ -338,20 +351,42 @@ def read_devices() -> list[RazerDevice]:
             continue
 
         with handle:
+            product_string = dev.get("product_string") or ""
+            name = _device_name(product_id, product_string)
+            serial = dev.get("serial_number") or ""
+            key = (product_id, serial or name)
+
             tid = _transaction_id_for(handle, product_id)
             if tid is None:
+                # The mouse did not answer. It is most likely asleep, so it
+                # is listed as a device that is not connected. A nameless
+                # interface tells nothing about the device it belongs to,
+                # so it is skipped.
+                if not product_string and product_id not in RAZER_DEVICES:
+                    continue
+                found.setdefault(key, RazerDevice(
+                    name=name, product_id=product_id, percent=0,
+                    charging=False, connected=False,
+                    connection=_connection_mode(name, False)))
                 continue
 
             response = _query(handle, tid, CMD_CLASS_POWER, CMD_BATTERY_LEVEL)
-            if response is None:
-                continue
-            if not _crc_valid(response):
+            if response is None or not _crc_valid(response):
+                found.setdefault(key, RazerDevice(
+                    name=name, product_id=product_id, percent=0,
+                    charging=False, connected=False,
+                    connection=_connection_mode(name, False)))
                 continue
 
             raw = response[10]
             if raw == 0:
-                # A zero reading usually means the mouse is asleep rather than
-                # genuinely empty; skip it so a stale value is not shown.
+                # A zero reading usually means the mouse is asleep rather
+                # than genuinely empty. It is shown as a device that is not
+                # connected, so a stale value is never shown.
+                found[key] = RazerDevice(
+                    name=name, product_id=product_id, percent=0,
+                    charging=False, connected=False,
+                    connection=_connection_mode(name, False))
                 continue
             percent = min(100, raw * 100 // 255)
 
@@ -361,15 +396,46 @@ def read_devices() -> list[RazerDevice]:
                 if charge_response is not None and _crc_valid(charge_response):
                     charging = charge_response[10] > 0
 
-            product_string = dev.get("product_string") or ""
-            name = _device_name(product_id, product_string)
-            serial = dev.get("serial_number") or ""
-            key = (product_id, serial or name)
             found[key] = RazerDevice(name=name, product_id=product_id,
                                      percent=percent, charging=charging,
-                                     connection=_connection_mode(name, charging))
+                                     connection=_connection_mode(name, charging),
+                                     polling_rate=_polling_rate(handle, tid),
+                                     dpi=_dpi(handle, tid))
 
     return sorted(found.values(), key=lambda d: d.name)
+
+
+def _polling_rate(handle: _HidHandle, tid: int) -> int:
+    """Reads the polling rate of a mouse, in Hz.
+
+    Returns zero when the mouse does not answer the query, which happens
+    with the mice that do not support the HyperPolling commands.
+    """
+    # The import is done here, because the settings module builds on this
+    # one and importing it at the top would be circular.
+    from .mouseconfig import (CMD_CLASS_DEVICE, CMD_GET_POLLING_RATE,
+                              POLLING_CODE_RATES, TX_MOUSE, _query)
+
+    response = _query(handle, TX_MOUSE, CMD_CLASS_DEVICE,
+                      CMD_GET_POLLING_RATE)
+    if response is None or not _crc_valid(response):
+        return 0
+    return POLLING_CODE_RATES.get(response[10], 0)
+
+
+def _dpi(handle: _HidHandle, tid: int) -> int:
+    """Reads the DPI a mouse is set to.
+
+    Returns zero when the mouse does not answer the query.
+    """
+    from .mouseconfig import (CMD_CLASS_DPI, CMD_GET_DPI, STORAGE_ACTIVE,
+                              TX_MOUSE, _query)
+
+    response = _query(handle, TX_MOUSE, CMD_CLASS_DPI, CMD_GET_DPI,
+                      bytes([STORAGE_ACTIVE]), data_size=0x07)
+    if response is None or not _crc_valid(response):
+        return 0
+    return (response[10] << 8) | response[11]
 
 
 def _connection_mode(name: str, charging: bool) -> str:

@@ -6,18 +6,18 @@ the result as a battery icon in the notification area.
 
 from __future__ import annotations
 
+import hashlib
 import threading
 import time
 from dataclasses import dataclass
 from typing import Callable
 
 import pystray
-from PIL import Image
 
 from . import autostart, singleton
 from .config import Config, config_dir
-from .drivers import bluetooth, razer
-from .icon import DeviceState, build_icon
+from .drivers import asusmouse, bluetooth, razer
+from .icon import DeviceState, build_device_icon, build_icon
 
 
 # Device kinds, in the order the user cares about them.
@@ -44,6 +44,10 @@ class Device:
     product_id: int | None = None
     connection: str = ""
     address: str = ""
+    # The polling rate the mouse is set to, in Hz. Zero when unknown.
+    polling_rate: int = 0
+    # The DPI the mouse is set to. Zero when unknown.
+    dpi: int = 0
     # The name reported by the device, used to look up the custom name.
     original_name: str = ""
     # ``False`` when the device is known but currently not reachable.
@@ -84,17 +88,21 @@ class Device:
     def detail_rows(self) -> list[tuple[str, str]]:
         """The key/value rows shown when a card is expanded."""
         rows: list[tuple[str, str]] = []
+
+        # The polling rate and the DPI are only known for the mice, which
+        # report them over their own protocol.
+        if self.polling_rate:
+            rows.append(("刷新率", f"{self.polling_rate} Hz"))
         if self.connection:
             rows.append(("连接方式", self.connection))
-        if self.product_id is not None:
-            rows.append(("产品 ID", f"0x{self.product_id:04X}"))
-        if self.address:
-            rows.append(("蓝牙地址", self.address))
         if not self.connected:
             rows.append(("状态", "未连接"))
-        elif self.percent is not None:
-            state = "充电中" if self.charging else "已连接"
-            rows.append(("状态", state))
+        elif self.charging:
+            rows.append(("状态", "充电中"))
+        else:
+            rows.append(("状态", "已连接"))
+        if self.dpi:
+            rows.append(("DPI", str(self.dpi)))
         return rows
 
 
@@ -109,11 +117,27 @@ def collect_devices(config: Config) -> list[Device]:
     for razer_device in razer.read_devices():
         devices.append(Device(
             name=razer_device.name,
-            percent=razer_device.percent,
+            # A sleeping mouse has no battery level to show.
+            percent=razer_device.percent if razer_device.connected else None,
             charging=razer_device.charging,
             kind=KIND_MOUSE,
             product_id=razer_device.product_id,
             connection=razer_device.connection,
+            polling_rate=razer_device.polling_rate,
+            dpi=razer_device.dpi,
+            connected=razer_device.connected,
+        ))
+
+    for asus_device in asusmouse.read_devices():
+        devices.append(Device(
+            name=asus_device.name,
+            percent=asus_device.percent,
+            charging=asus_device.charging,
+            kind=KIND_MOUSE,
+            product_id=asus_device.product_id,
+            connection=asus_device.connection,
+            polling_rate=asus_device.polling_rate,
+            dpi=asus_device.dpi,
         ))
 
     for bt_device in bluetooth.read_devices():
@@ -144,6 +168,10 @@ def collect_devices(config: Config) -> list[Device]:
         # settings window.
         allowed = config.kinds
         devices = [d for d in devices if d.kind in allowed]
+    if config.hide_disconnected:
+        # The tray already leaves the unreachable devices out, so dropping
+        # them here only affects the device list.
+        devices = [d for d in devices if d.connected]
     # The custom name is applied last, so the lookup always uses the name the
     # device reported.
     for device in devices:
@@ -257,7 +285,8 @@ class TrayApp:
     def __init__(self, config: Config | None = None):
         self.config = config or Config.load()
         self.devices: list[Device] = []
-        self._icon: pystray.Icon | None = None
+        self._icons: dict[str, pystray.Icon] = {}
+        self._icon_lock = threading.Lock()
         self._window = None
         self._stop = threading.Event()
         self._wake = threading.Event()
@@ -275,17 +304,6 @@ class TrayApp:
 
         with self._lock:
             self.devices = devices
-
-        if self._icon is not None:
-            try:
-                self._icon.icon = self._render_icon()
-                self._icon.title = build_tooltip(devices)
-                self._icon.update_menu()
-            except Exception:
-                # Updating the icon can fail while the shell is restarting or
-                # the icon is being replaced; a failed update must not stop
-                # the polling loop.
-                pass
 
         self._refresh_window(devices)
         self._write_status(devices)
@@ -308,6 +326,13 @@ class TrayApp:
 
     def _apply_to_window(self, window, devices: list[Device]) -> None:
         """Applies the readings to the window (runs on the tkinter thread)."""
+        # pystray is happiest when its icons are created and updated on the
+        # thread that owns the application window. Doing it from the poll
+        # thread can leave icons that appear in the shell but ignore clicks.
+        try:
+            self._sync_tray_icons(devices)
+        except Exception:
+            pass
         try:
             window.set_devices(devices)
         except Exception:
@@ -363,21 +388,99 @@ class TrayApp:
         except OSError:
             pass
 
-    def _render_icon(self) -> Image.Image:
-        """Builds the icon image for the current device list.
+    def _tray_devices(self, devices: list[Device]) -> list[Device]:
+        """The devices that get an icon of their own.
 
-        Devices that are not connected are left out; a device without a
-        battery level would only add an empty bolt to the icon.
+        By default every connected device has its own icon. When the user
+        turns that option off, only the device with the lowest charge is
+        shown, so the notification area stays narrow.
         """
-        with self._lock:
-            devices = connected_devices(list(self.devices))
-        if not devices:
-            return build_icon([])
-        if self.config.show_every_device and len(devices) > 1:
-            return build_icon([d.state for d in devices])
-        # Only the device with the lowest charge, which is the one that needs
-        # attention.
-        return build_icon([devices[0].state])
+        connected = connected_devices(devices)
+        if not connected:
+            return []
+        if self.config.show_every_device:
+            return connected
+        return [min(connected, key=lambda d: (d.percent is None,
+                                              d.percent
+                                              if d.percent is not None
+                                              else 101))]
+
+    @staticmethod
+    def _icon_name(device: Device) -> str:
+        """A stable, shell-safe name for one device's tray icon."""
+        key = f"{device.kind}|{device.original_name}|{device.address}"
+        digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+        return f"BatteryTray-{digest}"
+
+    @staticmethod
+    def _icon_title(device: Device) -> str:
+        """The tooltip of one tray icon."""
+        if not device.connected:
+            level = "disconnected"
+        elif device.percent is None:
+            level = "unknown"
+        else:
+            level = f"{device.percent}%"
+        if device.charging:
+            level += " (charging)"
+        return f"{device.name}: {level}"[:127]
+
+    def _sync_tray_icons(self, devices: list[Device]) -> None:
+        """Creates, updates and removes the per-device notification icons."""
+        with self._icon_lock:
+            self._sync_tray_icons_locked(devices)
+
+    def _sync_tray_icons_locked(self, devices: list[Device]) -> None:
+        selected = self._tray_devices(devices)
+        wanted: dict[str, Device | None] = {}
+        for device in selected:
+            wanted[self._icon_name(device)] = device
+
+        # A single muted icon keeps the app visible while no device is on.
+        if not wanted:
+            wanted["BatteryTray-none"] = None
+
+        for name in list(self._icons):
+            if name in wanted:
+                continue
+            try:
+                self._icons[name].stop()
+            except Exception:
+                pass
+            self._icons.pop(name, None)
+
+        for name, device in wanted.items():
+            if device is None:
+                image = build_device_icon("device", None, connected=False,
+                                          size=64)
+                title = "BatteryTray: no devices connected"
+            else:
+                image = build_device_icon(device.kind, device.percent,
+                                          device.charging, device.connected,
+                                          size=64)
+                title = self._icon_title(device)
+
+            icon = self._icons.get(name)
+            if icon is None:
+                icon = pystray.Icon(name, icon=image, title=title)
+                icon.menu = build_menu(
+                    self.config, icon,
+                    refresh=self._request_refresh,
+                    show_window=self._show_window,
+                    toggle_panel=self._toggle_panel,
+                    open_settings=self._open_settings,
+                    quit_app=self._quit,
+                )
+                icon.run_detached()
+                self._icons[name] = icon
+            else:
+                try:
+                    icon.icon = image
+                    icon.title = title
+                    icon.update_menu()
+                except Exception:
+                    # The shell may be restarting; the next poll tries again.
+                    pass
 
     def _check_low_battery(self, devices: list[Device]) -> None:
         """Sends a Windows notification when a device gets low."""
@@ -479,23 +582,8 @@ class TrayApp:
             self._window.withdraw()
         self._window.protocol("WM_DELETE_WINDOW", self._window.withdraw)
 
-        icon = pystray.Icon(
-            "batterytray",
-            icon=self._render_icon(),
-            title="BatteryTray: starting...",
-        )
-        self._icon = icon
-        icon.menu = build_menu(
-            self.config, icon,
-            refresh=self._request_refresh,
-            show_window=self._show_window,
-            toggle_panel=self._toggle_panel,
-            open_settings=self._open_settings,
-            quit_app=self._quit,
-        )
         self._save_notification_icon()
 
-        icon.run_detached()
         threading.Thread(target=self._loop, daemon=True).start()
 
         try:
@@ -503,8 +591,14 @@ class TrayApp:
         finally:
             self._stop.set()
             self._wake.set()
-            if self._icon is not None:
-                self._icon.stop()
+            with self._icon_lock:
+                icons = list(self._icons.values())
+                self._icons.clear()
+            for icon in icons:
+                try:
+                    icon.stop()
+                except Exception:
+                    pass
             guard.release()
 
     def _show_window(self) -> None:
@@ -550,10 +644,9 @@ class TrayApp:
             except Exception:
                 pass
 
-        if self._icon is not None:
+        if self._icons:
             try:
-                self._icon.title = build_tooltip(devices)
-                self._icon.update_menu()
+                self._sync_tray_icons(devices)
             except Exception:
                 pass
 
@@ -578,11 +671,17 @@ class TrayApp:
             pass
 
     def _quit(self) -> None:
-        """Stops the app and removes the tray icon."""
+        """Stops the app and removes the tray icons."""
         self._stop.set()
         self._wake.set()
-        if self._icon is not None:
-            self._icon.stop()
+        with self._icon_lock:
+            icons = list(self._icons.values())
+            self._icons.clear()
+        for icon in icons:
+            try:
+                icon.stop()
+            except Exception:
+                pass
         window = self._window
         if window is not None:
             try:

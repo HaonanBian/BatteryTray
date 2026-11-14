@@ -1,5 +1,5 @@
 """Battery level drivers for supported device families."""
 
-from . import bluetooth, razer
+from . import asusmouse, bluetooth, mouseadapter, mouseconfig, razer
 
-__all__ = ["bluetooth", "razer"]
+__all__ = ["asusmouse", "bluetooth", "mouseadapter", "mouseconfig", "razer"]

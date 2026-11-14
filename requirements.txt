@@ -1,6 +1,7 @@
 hidapi==0.15.0
 pystray==0.19.5
 pillow==13.0.0
+numpy==2.5.4
 win10toast==0.9
 pyinstaller==6.22.3
 pytest==8.4.2

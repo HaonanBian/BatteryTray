@@ -1,8 +1,8 @@
-"""The main window: a Razer Synapse inspired dashboard.
+"""The main window: a dark dashboard of large battery cards.
 
-The window shows one card per device with a battery ring, the device name,
-the connection mode and a set of detail rows. It is themed dark with a green
-accent, matching the look of Razer Synapse.
+The window shows one card per device. Every card is a wide battery with
+its charge painted as a muted glass fill and the percentage in white; the
+device name and its connection details sit above and below the battery.
 """
 
 from __future__ import annotations
@@ -11,35 +11,26 @@ import queue
 import tkinter as tk
 from tkinter import font as tkfont
 
-from .dpi import scale_font, scale_pixels, set_dpi_aware
+from .card import DeviceCard
+from .dpi import scale_pixels, set_dpi_aware
+from .dwm import style_window
+from .widgets import (
+    ACCENT,
+    BG,
+    BG_DIVIDER,
+    CHARGING,
+    DANGER,
+    FG,
+    FG_DIM,
+    FG_MUTED,
+    GlassButton,
+)
 
-# Razer Synapse-like palette.
-BG = "#111113"
-BG_CARD = "#1C1D20"
-BG_CARD_HOVER = "#24262A"
-BG_HEADER = "#0B0B0C"
-BG_FOOTER = "#0B0B0C"
-FG = "#EDEDED"
-FG_DIM = "#9C9EA3"
-FG_MUTED = "#6A6C71"
-ACCENT = "#00E676"
-ACCENT_DARK = "#00A854"
-WARNING = "#FFB300"
-DANGER = "#F44336"
-CHARGING = "#29B6F6"
-
-# Level thresholds, matching icon.py.
-HIGH = 60
+# The level at which the colour of the status changes.
 MEDIUM = 20
 
-# Icon names shown next to a device kind.
-KIND_ICONS = {
-    "mouse": "MOUSE",
-    "headset": "HEADSET",
-    "controller": "GAMEPAD",
-    "keyboard": "KEYBOARD",
-    "device": "DEVICE",
-}
+# The most device cards that fit next to each other in one row.
+MAX_COLUMNS = 4
 
 
 def pick_font_family(root: tk.Misc) -> str:
@@ -49,264 +40,6 @@ def pick_font_family(root: tk.Misc) -> str:
         if name in available:
             return name
     return "TkDefaultFont"
-
-
-def level_color(percent: int | None, charging: bool = False) -> str:
-    """Colour for a battery level."""
-    if percent is None:
-        return FG_MUTED
-    if charging:
-        return CHARGING
-    if percent >= HIGH:
-        return ACCENT
-    if percent >= MEDIUM:
-        return WARNING
-    return DANGER
-
-
-class BatteryRing(tk.Canvas):
-    """A circular battery gauge drawn on a canvas."""
-
-    def __init__(self, master: tk.Misc, size: int = 64, bg: str = BG_CARD):
-        super().__init__(master, width=size, height=size, bg=bg,
-                         highlightthickness=0)
-        self._size = size
-        self._percent: int | None = None
-        self._charging = False
-
-        pad = max(4, size // 13)
-        stroke = max(4, size // 10)
-        self._box = self.create_oval(pad, pad, size - pad, size - pad,
-                                     outline="#34363B", width=stroke)
-        self._arc = self.create_arc(pad, pad, size - pad, size - pad,
-                                    start=90, extent=0, style="arc",
-                                    outline=ACCENT, width=stroke)
-        self._text = self.create_text(size / 2, size / 2, text="--", fill=FG,
-                                      font=("Segoe UI", max(9, size // 5),
-                                            "bold"))
-        self._bolt = self.create_text(size / 2, size / 2 - size // 4, text="⚡",
-                                      fill=CHARGING,
-                                      font=("Segoe UI Emoji", max(7, size // 8)),
-                                      state="hidden")
-
-    def set_background(self, color: str) -> None:
-        """Changes the widget background (used for hover effects)."""
-        self.configure(bg=color)
-
-    def set_percent(self, percent: int | None, charging: bool = False) -> None:
-        """Updates the gauge."""
-        self._percent = percent
-        self._charging = charging
-
-        if percent is None:
-            self.itemconfigure(self._arc, extent=0, outline=FG_MUTED)
-            self.itemconfigure(self._text, text="--", fill=FG_MUTED)
-            self.itemconfigure(self._bolt, state="hidden")
-            return
-
-        color = level_color(percent, charging)
-        self.itemconfigure(self._arc, extent=-359.9 * (percent / 100),
-                           outline=color)
-        self.itemconfigure(self._text, text=f"{percent}%", fill=FG)
-        if charging:
-            self.itemconfigure(self._bolt, state="normal")
-        else:
-            self.itemconfigure(self._bolt, state="hidden")
-
-
-class DeviceCard(tk.Frame):
-    """One device: battery ring, name, connection mode and detail rows."""
-
-    def __init__(self, master: tk.Misc, family: str, dpi: float = 96.0,
-                 on_click=None, on_rename=None):
-        super().__init__(master, bg=BG_CARD, highlightthickness=1,
-                         highlightbackground="#2E3035")
-        self.family = family
-        self.dpi = dpi
-        self.on_click = on_click
-        self.on_rename = on_rename
-        self._percent: int | None = None
-        self._charging = False
-        self._detail_widgets: list[tk.Widget] = []
-        self._editor: tk.Entry | None = None
-        self._editor_row: tk.Frame | None = None
-        self._original_name = ""
-
-        ring_size = scale_pixels(64, dpi)
-        pad_x = scale_pixels(16, dpi)
-        gap = scale_pixels(14, dpi)
-
-        # A single column holds the whole card so the detail rows always end
-        # up below the summary instead of sharing rows with it.
-        body = tk.Frame(self, bg=BG_CARD)
-        body.pack(fill="x")
-        body.grid_columnconfigure(1, weight=1)
-
-        # Left: the battery ring.
-        self.ring = BatteryRing(body, size=ring_size)
-        self.ring.grid(row=0, column=0, rowspan=3, padx=(pad_x, gap),
-                        pady=scale_pixels(16, dpi))
-
-        # Right: kind, name and status.
-        self.kind_label = tk.Label(body, text="", bg=BG_CARD, fg=FG_MUTED,
-                                   font=(family, scale_font(7, dpi)), anchor="w")
-        self.kind_label.grid(row=0, column=1, sticky="w",
-                             pady=(scale_pixels(16, dpi), 0))
-
-        self.name_label = tk.Label(body, text="", bg=BG_CARD, fg=FG,
-                                   font=(family, scale_font(10, dpi), "bold"),
-                                   anchor="w")
-        self.name_label.grid(row=1, column=1, sticky="w")
-
-        self.status_label = tk.Label(body, text="", bg=BG_CARD, fg=FG_DIM,
-                                     font=(family, scale_font(8, dpi)), anchor="w")
-        self.status_label.grid(row=2, column=1, sticky="w",
-                               pady=(scale_pixels(3, dpi), scale_pixels(16, dpi)))
-
-        # The rename button sits on the right of the card.
-        self.rename_button = tk.Label(body, text="✎", bg=BG_CARD, fg=FG_MUTED,
-                                      font=(family, scale_font(11, dpi)),
-                                      cursor="hand2")
-        self.rename_button.grid(row=1, column=2, sticky="e",
-                                padx=(scale_pixels(8, dpi), scale_pixels(16, dpi)))
-        self.rename_button.bind("<Button-1>", self._start_rename)
-
-        self._body = body
-        self._bind_hover()
-
-    def _bind_hover(self) -> None:
-        """Highlights the card when the pointer is over it."""
-        widgets = [self, self._body, self.ring, self.kind_label,
-                   self.name_label, self.status_label, self.rename_button]
-
-        def enter(_event=None):
-            if self.on_click is None:
-                return
-            for widget in widgets:
-                widget.configure(bg=BG_CARD_HOVER)
-            self.ring.set_background(BG_CARD_HOVER)
-
-        def leave(_event=None):
-            for widget in widgets:
-                widget.configure(bg=BG_CARD)
-            self.ring.set_background(BG_CARD)
-
-        for widget in widgets:
-            widget.bind("<Enter>", enter)
-            widget.bind("<Leave>", leave)
-
-    # ------------------------------------------------------------------
-    # Renaming
-    # ------------------------------------------------------------------
-
-    def _start_rename(self, _event=None) -> None:
-        """Opens the inline editor for the device name."""
-        if self.on_rename is None or self._editor is not None:
-            return
-
-        self.name_label.grid_remove()
-
-        row = tk.Frame(self._body, bg=BG_CARD)
-        row.grid(row=1, column=1, sticky="ew")
-        row.grid_columnconfigure(0, weight=1)
-
-        entry = tk.Entry(row, bg="#101113", fg=FG, insertbackground=ACCENT,
-                         relief="flat", bd=0,
-                         font=(self.family, scale_font(10, self.dpi)))
-        entry.grid(row=0, column=0, sticky="ew",
-                   padx=(0, scale_pixels(8, self.dpi)))
-        entry.insert(0, self.name_label.cget("text"))
-        entry.select_range(0, "end")
-
-        def commit(_event=None):
-            self._finish_rename(entry.get())
-
-        def cancel(_event=None):
-            self._cancel_rename()
-
-        entry.bind("<Return>", commit)
-        entry.bind("<Escape>", cancel)
-        entry.bind("<FocusOut>", commit)
-
-        self._editor = entry
-        self._editor_row = row
-        entry.focus_set()
-
-    def _finish_rename(self, text: str) -> None:
-        """Applies the new name and closes the editor."""
-        entry = self._editor
-        self._editor = None
-        if entry is not None:
-            entry.destroy()
-        if self._editor_row is not None:
-            self._editor_row.destroy()
-            self._editor_row = None
-        self.name_label.grid()
-
-        name = text.strip()
-        if name and name != self.name_label.cget("text"):
-            # Show the new name right away; the app stores it and refreshes
-            # the whole list afterwards.
-            self.name_label.configure(text=name)
-
-        if self.on_rename is not None:
-            self.on_rename(self._original_name, name)
-
-    def _cancel_rename(self) -> None:
-        """Closes the editor without changing the name."""
-        entry = self._editor
-        self._editor = None
-        if entry is not None:
-            entry.destroy()
-        if self._editor_row is not None:
-            self._editor_row.destroy()
-            self._editor_row = None
-        self.name_label.grid()
-
-    def update(self, device) -> None:
-        """Refreshes the card with a new reading."""
-        self._percent = device.percent
-        self._charging = device.charging
-        self._original_name = getattr(device, "original_name", device.name)
-
-        self.kind_label.configure(text=KIND_ICONS.get(device.kind, "DEVICE"))
-        self.name_label.configure(text=device.name)
-        self.ring.set_percent(device.percent, device.charging)
-
-        if device.charging:
-            text, fg = "充电中", CHARGING
-        elif device.percent is None:
-            text, fg = "未连接", FG_MUTED
-        else:
-            text, fg = device.subtitle, FG_DIM
-        self.status_label.configure(text=text, fg=fg)
-
-    def set_details(self, rows: list[tuple[str, str]]) -> None:
-        """Shows the detail rows under the card."""
-        for widget in self._detail_widgets:
-            widget.destroy()
-        self._detail_widgets.clear()
-
-        if not rows:
-            return
-
-        # A thin divider separates the summary from the detail rows.
-        divider = tk.Frame(self, bg="#2E3035", height=1)
-        divider.pack(fill="x", padx=scale_pixels(16, self.dpi),
-                     pady=(0, scale_pixels(8, self.dpi)))
-        self._detail_widgets.append(divider)
-
-        label_font = (self.family, scale_font(8, self.dpi))
-        gap = scale_pixels(18, self.dpi)
-        for key, value in rows:
-            row = tk.Frame(self, bg=BG_CARD)
-            row.pack(fill="x", padx=(scale_pixels(16, self.dpi), gap),
-                     pady=scale_pixels(1, self.dpi))
-            tk.Label(row, text=key, bg=BG_CARD, fg=FG_MUTED,
-                     font=label_font, anchor="w").pack(side="left")
-            tk.Label(row, text=value, bg=BG_CARD, fg=FG,
-                     font=label_font, anchor="w").pack(side="right")
-            self._detail_widgets.append(row)
 
 
 class BatteryWindow(tk.Tk):
@@ -325,21 +58,79 @@ class BatteryWindow(tk.Tk):
 
         self.title("BatteryTray")
         self.configure(bg=BG)
-        self.resizable(False, False)
+        # The window can be resized freely. The minimum keeps the header
+        # and the footer readable, the canvas scrolls whatever does not
+        # fit.
+        self.resizable(True, True)
+        self.minsize(scale_pixels(360, self.dpi),
+                     scale_pixels(260, self.dpi))
         self.geometry(f"{scale_pixels(440, self.dpi)}x"
-                      f"{scale_pixels(420, self.dpi)}")
+                      f"{scale_pixels(300, self.dpi)}")
 
         self._cards: list[DeviceCard] = []
+        # How many cards fit next to each other. One until the window is
+        # wide enough for two.
+        self._columns = 1
+        # Set while a relayout is waiting for the event loop, so it is
+        # not started twice.
+        self._relayout_pending = False
+        # Set once the user resizes the window by hand. From then on the
+        # window keeps the size they picked and the list scrolls.
+        self._user_resized = False
+        # The size the window had the last time it was laid out. A change
+        # means the user resized it, which is what sets the flag above.
+        self._last_size: tuple[int, int] | None = None
+        # Set while the code itself changes the size, so the resize is not
+        # mistaken for the user reaching for the border.
+        self._resizing = False
         self._build()
         self._drain_pending()
 
         # The popup that the tray icon shows; it lives on top of the window.
         from .quickpanel import QuickPanel
 
-        self.quick_panel = QuickPanel(self, on_rename=self._ask_rename)
+        self.quick_panel = QuickPanel(self, on_rename=self._ask_rename,
+                                      on_open=self._open_main_from_panel)
 
         # Closing the window hides it; the tray icon keeps the app alive.
         self.protocol("WM_DELETE_WINDOW", self.withdraw)
+
+        # Remember that the user picked a size, so the window stops
+        # growing on its own when new devices show up.
+        self.bind("<Configure>", self._on_window_configure)
+
+        # The title bar of Windows is white and does not fit to the dark
+        # window. Windows 11 can give the window a translucent backdrop,
+        # which makes the title bar part of the window.
+        style_window(self)
+
+    def _on_window_configure(self, event) -> None:
+        """Notices that the user resized the window.
+
+        The first layout does not count, because the window has not been
+        shown yet and its size still comes from the code. Neither does a
+        resize that the code asked for itself.
+        """
+        if event.widget is not self:
+            return
+        size = (self.winfo_width(), self.winfo_height())
+        if self._last_size is None:
+            self._last_size = size
+            return
+        if size == self._last_size:
+            return
+        self._last_size = size
+        if not self._resizing:
+            self._user_resized = True
+
+    def forget_user_resize(self) -> None:
+        """Starts tracking the window size again.
+
+        The window stops growing on its own after the user has resized
+        it. This undoes that, so the window fits its content again.
+        """
+        self._user_resized = False
+        self._last_size = (self.winfo_width(), self.winfo_height())
 
     def post(self, func, *args) -> None:
         """Schedules a call to run on the tkinter thread."""
@@ -363,25 +154,25 @@ class BatteryWindow(tk.Tk):
         """Builds the window layout."""
         dpi = self.dpi
         s = lambda px: scale_pixels(px, dpi)  # noqa: E731
-        f = lambda pt: scale_font(pt, dpi)    # noqa: E731
+        fp = lambda px: -scale_pixels(px, dpi)  # noqa: E731
 
         # ---- Header ----
-        header = tk.Frame(self, bg=BG_HEADER, height=s(78))
+        header = tk.Frame(self, bg=BG, height=s(58))
         header.pack(fill="x", side="top")
         header.pack_propagate(False)
 
-        brand = tk.Frame(header, bg=BG_HEADER)
-        brand.pack(side="left", padx=s(20), pady=s(15))
-        tk.Label(brand, text="BATTERYTRAY", bg=BG_HEADER, fg=ACCENT,
-                 font=(self.family, f(12), "bold")).pack(anchor="w")
-        tk.Label(brand, text="鼠标与耳机电量", bg=BG_HEADER, fg=FG_MUTED,
-                 font=(self.family, f(8))).pack(anchor="w", pady=(s(2), 0))
+        brand = tk.Frame(header, bg=BG)
+        brand.pack(side="left", padx=s(18), pady=s(9))
+        tk.Label(brand, text="BatteryTray", bg=BG, fg=FG,
+                 font=(self.family, fp(15), "bold")).pack(anchor="w")
+        tk.Label(brand, text="鼠标与耳机电量", bg=BG, fg=FG_MUTED,
+                 font=(self.family, fp(9))).pack(anchor="w", pady=(s(1), 0))
 
-        self.header_status = tk.Label(header, text="", bg=BG_HEADER, fg=FG_DIM,
-                                      font=(self.family, f(8)), anchor="e")
-        self.header_status.pack(side="right", padx=s(20))
+        self.header_status = tk.Label(header, text="", bg=BG, fg=FG_DIM,
+                                      font=(self.family, fp(9)), anchor="e")
+        self.header_status.pack(side="right", padx=s(18))
 
-        tk.Frame(self, bg="#232428", height=1).pack(fill="x", side="top")
+        tk.Frame(self, bg=BG_DIVIDER, height=1).pack(fill="x", side="top")
 
         # ---- Device list ----
         # The list lives inside a canvas so that many devices can be scrolled
@@ -398,12 +189,20 @@ class BatteryWindow(tk.Tk):
                                       bd=0, highlightthickness=0)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
-        self.canvas.pack(side="left", fill="both", expand=True,
-                         padx=(s(16), 0), pady=(s(16), 0))
-        self.scrollbar.pack(side="right", fill="y", padx=(0, s(8)),
-                            pady=(s(16), 0))
+        # The scroll bar gets its own column, so the canvas takes the rest
+        # of the room. The canvas may not claim the room of the scroll
+        # bar, otherwise the scroll bar ends up outside of the window when
+        # the window becomes small.
+        list_wrap.grid_columnconfigure(0, weight=1)
+        list_wrap.grid_columnconfigure(1, weight=0, minsize=0)
+        list_wrap.grid_rowconfigure(0, weight=1)
+
+        self.canvas.grid(row=0, column=0, sticky="nsew",
+                         padx=(s(14), s(8)), pady=(s(12), 0))
+        self.scrollbar.grid(row=0, column=1, sticky="ns",
+                            padx=(0, s(6)), pady=(s(12), 0))
         # The scrollbar is only useful when the content overflows.
-        self.scrollbar.pack_forget()
+        self.scrollbar.grid_remove()
 
         self.list_frame = tk.Frame(self.canvas, bg=BG)
         self._window_id = self.canvas.create_window((0, 0), window=self.list_frame,
@@ -411,32 +210,33 @@ class BatteryWindow(tk.Tk):
 
         self.list_frame.bind("<Configure>", self._on_list_configure)
         self.canvas.bind("<Configure>", self._on_canvas_configure)
-        self._bind_mousewheel(self.canvas)
-        self._bind_mousewheel(self.list_frame)
+
+        # The wheel is bound to the whole window, because the cards are
+        # children of the list and a binding on the list alone would not
+        # see the wheel while the pointer rests on a card.
+        self.bind("<MouseWheel>", self._on_mousewheel)
+        self.bind("<Button-4>", self._on_mousewheel)
+        self.bind("<Button-5>", self._on_mousewheel)
 
         # ---- Footer ----
-        tk.Frame(self, bg="#232428", height=1).pack(fill="x", side="bottom")
-        footer = tk.Frame(self, bg=BG_FOOTER, height=s(48))
+        tk.Frame(self, bg=BG_DIVIDER, height=1).pack(fill="x", side="bottom")
+        footer = tk.Frame(self, bg=BG, height=s(42))
         footer.pack(fill="x", side="bottom")
         footer.pack_propagate(False)
 
-        self.summary_label = tk.Label(footer, text="", bg=BG_FOOTER, fg=FG_DIM,
-                                      font=(self.family, f(8)), anchor="w")
-        self.summary_label.pack(side="left", padx=s(20))
+        self.summary_label = tk.Label(footer, text="", bg=BG, fg=FG_DIM,
+                                      font=(self.family, fp(9)), anchor="w")
+        self.summary_label.pack(side="left", padx=s(18))
 
-        tk.Button(footer, text="设置", command=self._open_settings,
-                  bg="#24262A", fg=FG, activebackground="#2E3136",
-                  activeforeground=ACCENT, relief="flat", bd=0,
-                  font=(self.family, f(8)), padx=s(16), pady=s(5),
-                  highlightthickness=0, cursor="hand2").pack(side="right",
-                                                             padx=(0, s(10)), pady=s(8))
+        GlassButton(footer, "设置", self.family, dpi,
+                    command=self._open_settings,
+                    background=BG).pack(side="right", padx=(0, s(10)),
+                                        pady=s(6))
 
-        tk.Button(footer, text="刷新", command=self.app.request_refresh,
-                  bg="#24262A", fg=FG, activebackground="#2E3136",
-                  activeforeground=ACCENT, relief="flat", bd=0,
-                  font=(self.family, f(8)), padx=s(16), pady=s(5),
-                  highlightthickness=0, cursor="hand2").pack(side="right",
-                                                             padx=s(20), pady=s(8))
+        GlassButton(footer, "刷新", self.family, dpi,
+                    command=self.app.request_refresh,
+                    background=BG).pack(side="right", padx=(0, s(18)),
+                                        pady=s(6))
 
     def _open_settings(self) -> None:
         """Shows the settings dialog and applies the result."""
@@ -447,27 +247,77 @@ class BatteryWindow(tk.Tk):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def _on_canvas_configure(self, event) -> None:
-        """Keeps the list frame as wide as the canvas."""
+        """Keeps the list frame as wide as the canvas.
+
+        The width decides whether the cards fit in one column or in two,
+        so the layout has to be redone whenever it changes. The scroll
+        bar is placed again as well, because it has to move when the
+        window becomes smaller.
+        """
         self.canvas.itemconfigure(self._window_id, width=event.width)
+        self._update_scrollbar()
+        if not self._cards:
+            return
+        if self._column_count() == self._columns:
+            return
+        # The cards cannot be moved while Tk is in the middle of the
+        # layout, so the work is put off until the event is over.
+        if self._relayout_pending:
+            return
+        self._relayout_pending = True
+        self.after_idle(self._relayout_cards)
 
-    def _bind_mousewheel(self, widget: tk.Widget) -> None:
-        """Scrolls the list with the mouse wheel."""
-        def on_wheel(event):
-            # Only scroll when there is something to scroll.
-            if self.canvas.bbox("all") is None:
-                return
-            top = self.canvas.yview()[0]
-            bottom = self.canvas.yview()[1]
-            if top <= 0 and bottom >= 1:
-                return
-            if event.delta < 0:
-                self.canvas.yview_scroll(-2, "units")
-            else:
-                self.canvas.yview_scroll(2, "units")
+    def _relayout_cards(self) -> None:
+        """Moves the cards to a second column once there is room."""
+        self._relayout_pending = False
+        if not self._cards:
+            return
+        self._layout_cards()
+        # The scroll bar may be needed now, but the layout must not be
+        # asked for again from here: this runs inside the event loop.
+        self._update_scrollbar()
 
-        widget.bind("<MouseWheel>", on_wheel)
-        widget.bind("<Button-4>", lambda e: self.canvas.yview_scroll(-2, "units"))
-        widget.bind("<Button-5>", lambda e: self.canvas.yview_scroll(2, "units"))
+    def _on_mousewheel(self, event) -> None:
+        """Scrolls the device list with the mouse wheel.
+
+        The binding sits on the window, so it also fires while the pointer
+        rests on a card. It only scrolls when the pointer is over the list,
+        so the wheel keeps its usual meaning everywhere else.
+        """
+        if not self._pointer_over_list():
+            return
+
+        if getattr(event, "num", None) == 4:
+            self.canvas.yview_scroll(-2, "units")
+            return
+        if getattr(event, "num", None) == 5:
+            self.canvas.yview_scroll(2, "units")
+            return
+
+        delta = getattr(event, "delta", 0)
+        if not delta:
+            return
+
+        # Only scroll when there is something to scroll.
+        if self.canvas.bbox("all") is None:
+            return
+        top = self.canvas.yview()[0]
+        bottom = self.canvas.yview()[1]
+        if top <= 0 and bottom >= 1:
+            return
+
+        # A notch of the wheel is 120 units on Windows.
+        steps = int(-delta / 120) * 2 or (-2 if delta > 0 else 2)
+        self.canvas.yview_scroll(steps, "units")
+
+    def _pointer_over_list(self) -> bool:
+        """Whether the pointer is over the list of devices."""
+        x = self.winfo_pointerx()
+        y = self.winfo_pointery()
+        left = self.canvas.winfo_rootx()
+        top = self.canvas.winfo_rooty()
+        return (left <= x < left + self.canvas.winfo_width()
+                and top <= y < top + self.canvas.winfo_height())
 
     def set_devices(self, devices: list) -> None:
         """Rebuilds the device cards."""
@@ -481,9 +331,10 @@ class BatteryWindow(tk.Tk):
         self.quick_panel.set_devices(devices)
 
         if not devices:
+            # The cards use the grid, so the placeholder has to use it too.
             tk.Label(self.list_frame, text="未检测到设备", bg=BG, fg=FG_MUTED,
-                     font=(self.family, scale_font(10, self.dpi))).pack(
-                         pady=scale_pixels(40, self.dpi))
+                     font=(self.family, -scale_pixels(10, self.dpi))).grid(
+                         row=0, column=0, pady=scale_pixels(40, self.dpi))
             self.summary_label.configure(text="")
             self.header_status.configure(text="")
             self._update_scrollbar()
@@ -505,11 +356,22 @@ class BatteryWindow(tk.Tk):
 
         for device in devices:
             card = DeviceCard(self.list_frame, self.family, self.dpi,
-                              on_rename=self._rename_device)
+                              on_rename=self._rename_device,
+                              on_configure=self._open_mouse_settings)
             card.update(device)
-            card.pack(fill="x", pady=(0, scale_pixels(10, self.dpi)))
             card.set_details(device.detail_rows)
             self._cards.append(card)
+
+        # The cards have to be placed after the layout, because the width
+        # of the list decides whether they fit in one column or in two.
+        self.update_idletasks()
+        self._layout_cards()
+        self.update_idletasks()
+        for card in self._cards:
+            card.refresh_layout()
+        # The canvas may give the cards their final width one idle cycle
+        # later; clip the names again then.
+        self.after_idle(self._refresh_cards)
 
         connected = sum(1 for d in devices if d.percent is not None)
         self.summary_label.configure(
@@ -519,11 +381,90 @@ class BatteryWindow(tk.Tk):
         self._update_scrollbar()
         self.resize_to_content()
 
+    def _refresh_cards(self) -> None:
+        """Redraws the cards after the pending layout has settled."""
+        for card in self._cards:
+            try:
+                card.refresh_layout()
+            except Exception:
+                pass
+
+    def _column_count(self) -> int:
+        """How many cards fit side by side in the current window width.
+
+        A card needs room for the battery, the device name and the two
+        buttons on the right. Anything narrower than that would clip the
+        text, so a new column only appears once there is room for the
+        whole card.
+        """
+        # The width of the window is always up to date, while the canvas
+        # keeps the width it had during the last layout. The window is
+        # used as the source of truth and the space the list does not get
+        # is taken off.
+        available = self.winfo_width()
+        if available <= 1:
+            # The window has not been laid out yet.
+            return 1
+        # The padding around the list and the scroll bar.
+        available -= scale_pixels(40, self.dpi)
+        # The width one card needs, plus the gap between two columns. A
+        # card has to be wide enough for the battery and for a device
+        # name, otherwise the name has to be cut short.
+        needed = scale_pixels(360, self.dpi) + scale_pixels(12, self.dpi)
+        # As many columns as fit, but never more than the limit.
+        columns = available // needed
+        return max(1, min(MAX_COLUMNS, columns))
+
+    def _layout_cards(self) -> None:
+        """Places the cards in as many columns as fit.
+
+        The window is free to be resized, so the cards move to another
+        column as soon as there is room for them.
+        """
+        columns = self._column_count()
+        gap = scale_pixels(12, self.dpi)
+        self._columns = columns
+
+        # All columns are the same width and fill the window. The size of
+        # the columns is set by hand, because the ``uniform`` option would
+        # leave the cards hidden when the number of columns changes.
+        width = 0
+        if columns > 1:
+            # The width of the window is always up to date, while the list
+            # frame still has the width of the last layout.
+            available = self.winfo_width() - scale_pixels(40, self.dpi)
+            width = max(1, (available - gap * (columns - 1)) // columns)
+        for column in range(MAX_COLUMNS):
+            self.list_frame.grid_columnconfigure(
+                column, weight=1 if column < columns else 0,
+                minsize=width if column < columns else 0)
+
+        for index, card in enumerate(self._cards):
+            row = index // columns
+            column = index % columns
+            # The gap sits between the columns, not at the edge.
+            padx = (0, gap) if column < columns - 1 else 0
+            # The card is taken out of the grid and put back in, because
+            # Tk leaves the cards hidden when the columns change. The
+            # cards would keep the place they had in the old layout and
+            # stay invisible.
+            card.grid_forget()
+            card.grid(row=row, column=column, sticky="nsew",
+                      padx=padx, pady=(0, gap))
+
     def _rename_device(self, original_name: str, new_name: str) -> None:
         """Stores a new name for a device and refreshes the view."""
         if self.app is None:
             return
         self.app.rename_device(original_name, new_name)
+
+    def _open_mouse_settings(self, original_name: str, display_name: str,
+                             product_id: int | None) -> None:
+        """Opens the settings window of a mouse."""
+        from .mousesettingsdialog import ask_mouse_settings
+
+        ask_mouse_settings(self, display_name or original_name, product_id,
+                           self.family, self.dpi)
 
     def _ask_rename(self, original_name: str) -> None:
         """Opens the rename dialog for a device.
@@ -553,6 +494,11 @@ class BatteryWindow(tk.Tk):
         """Shows or hides the popup with the battery levels."""
         self.quick_panel.toggle()
 
+    def _open_main_from_panel(self) -> None:
+        """Closes the tray strip and opens the full window."""
+        self.quick_panel.hide()
+        self.show()
+
     def open_settings(self) -> None:
         """Shows the settings window."""
         from .settingsdialog import ask_settings
@@ -569,16 +515,18 @@ class BatteryWindow(tk.Tk):
 
     def _update_scrollbar(self) -> None:
         """Shows the scrollbar only when the content does not fit."""
+        # The scrollbar is always placed anew. Placing a widget that is
+        # already placed does nothing, so it would keep the place it had
+        # when the window was wider and end up outside of the window.
+        self.scrollbar.grid_remove()
         bbox = self.canvas.bbox("all")
         if bbox is None:
-            self.scrollbar.pack_forget()
             return
         content_height = bbox[3] - bbox[1]
         if content_height > self.canvas.winfo_height():
-            self.scrollbar.pack(side="right", fill="y", padx=(0, scale_pixels(8, self.dpi)),
-                                pady=(scale_pixels(16, self.dpi), 0))
-        else:
-            self.scrollbar.pack_forget()
+            self.scrollbar.grid(row=0, column=1, sticky="ns",
+                                padx=(0, scale_pixels(6, self.dpi)),
+                                pady=(scale_pixels(12, self.dpi), 0))
 
     def show(self) -> None:
         """Brings the window to the front."""
@@ -594,7 +542,14 @@ class BatteryWindow(tk.Tk):
             self.show()
 
     def resize_to_content(self) -> None:
-        """Sizes the window so every device card fits without scrolling."""
+        """Grows the window so every device card fits without scrolling.
+
+        The user may resize the window freely. Once they have picked a
+        size the window keeps it and the list scrolls instead, so the
+        window does not jump around while the devices refresh.
+        """
+        if self._user_resized:
+            return
         self.update_idletasks()
         bbox = self.canvas.bbox("all")
         if bbox is None:
@@ -602,10 +557,20 @@ class BatteryWindow(tk.Tk):
         content_height = bbox[3] - bbox[1]
         # The canvas starts below the header; the footer is packed at the
         # bottom, so the window has to be tall enough for both.
-        wanted = content_height + scale_pixels(16, self.dpi) \
-            + scale_pixels(78, self.dpi) + scale_pixels(49, self.dpi)
+        wanted = content_height + scale_pixels(12, self.dpi) \
+            + scale_pixels(58, self.dpi) + scale_pixels(43, self.dpi)
+        # Do not grow past the screen: a window taller than the desktop
+        # would hide its own footer and the taskbar. The list scrolls.
+        limit = self.winfo_screenheight() - scale_pixels(90, self.dpi)
+        if limit > scale_pixels(260, self.dpi):
+            wanted = min(wanted, limit)
         current = self.winfo_height()
         # Grow to fit, but never shrink below what is already shown.
         if wanted > current:
-            self.geometry(f"{self.winfo_width()}x{wanted}")
-            self.update_idletasks()
+            self._resizing = True
+            try:
+                self.geometry(f"{self.winfo_width()}x{wanted}")
+                self.update_idletasks()
+            finally:
+                self._resizing = False
+            self._last_size = (self.winfo_width(), self.winfo_height())

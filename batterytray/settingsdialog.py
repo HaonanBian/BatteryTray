@@ -12,6 +12,7 @@ from tkinter import font as tkfont
 
 from .config import Config
 from .dpi import scale_font, scale_pixels
+from .dwm import style_window
 
 BG = "#111113"
 BG_CARD = "#1C1D20"
@@ -63,6 +64,9 @@ class SettingsDialog(tk.Toplevel):
         self.resizable(False, False)
         self.attributes("-topmost", True)
         self.transient(master)
+        # The title bar of Windows is white and does not fit to the dark
+        # dialog.
+        style_window(self)
 
         pad = scale_pixels(20, dpi)
         f = lambda pt: scale_font(pt, dpi)  # noqa: E731
@@ -163,6 +167,22 @@ class SettingsDialog(tk.Toplevel):
                        font=(family, f(9)),
                        anchor="w").pack(side="left")
 
+        # ---- The hide-disconnected toggle ----
+        disconnected_row = tk.Frame(body, bg=BG)
+        disconnected_row.pack(fill="x", pady=(s(10), 0))
+        self.disconnected_var = tk.BooleanVar(value=config.hide_disconnected)
+        tk.Checkbutton(disconnected_row, text="隐藏未连接的设备",
+                       variable=self.disconnected_var, bg=BG, fg=FG,
+                       activebackground=BG, activeforeground=FG,
+                       selectcolor=BG_FIELD, highlightthickness=0, bd=0,
+                       font=(family, f(9)),
+                       anchor="w").pack(side="left")
+
+        tk.Label(disconnected_row,
+                 text="设备列表里不显示离线的设备",
+                 bg=BG, fg=FG_MUTED,
+                 font=(family, f(8))).pack(side="left", padx=(s(10), 0))
+
         # ---- Buttons ----
         tk.Frame(self, bg="#232428", height=1).pack(fill="x", side="bottom")
         buttons = tk.Frame(self, bg=BG)
@@ -223,6 +243,7 @@ class SettingsDialog(tk.Toplevel):
         new_config = Config(
             poll_interval=self._clamped_interval(),
             show_every_device=self.every_var.get(),
+            hide_disconnected=self.disconnected_var.get(),
             low_battery_threshold=self._clamped_threshold(),
             notify_low_battery=self.notify_var.get(),
             autostart=self._autostart,
