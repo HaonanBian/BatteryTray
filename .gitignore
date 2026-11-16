@@ -21,7 +21,7 @@ dist/
 # release/*.exe is NOT ignored.
 
 # Probe output and reference dumps from the protocol research
-asukb.txt
+asuskb.txt
 hid_h.txt
 mch5.txt
 pprovider.txt
