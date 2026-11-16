@@ -15,8 +15,9 @@ from PIL import Image
 from batterytray import autostart, singleton
 from batterytray.app import Device, build_tooltip, collect_devices
 from batterytray.config import Config
-from batterytray.drivers import (asusmouse, bluetooth, hidvendor, logitech,
-                                  mouseadapter, mouseconfig, razer)
+from batterytray.drivers import (asusmouse, bluetooth, devices, hidvendor,
+                                  logitech, mouseadapter, mouseconfig, razer,
+                                  vendor2)
 from batterytray.icon import (DeviceState, build_device_icon, build_icon,
                               level_color)
 
@@ -1860,6 +1861,83 @@ def test_window_posts_work_to_the_tkinter_thread(gui_window):
     assert calls == [42]
 
 
+def test_a_dialog_stays_visible_when_the_main_window_is_hidden(gui_window):
+    """A dialog must show up even when the main window is hidden.
+
+    The app lives in the notification area, so the main window is hidden
+    most of the time. A dialog that belongs to a hidden window is never
+    mapped by Windows, which made the settings button look like it did
+    nothing at all.
+    """
+    pytest.importorskip("tkinter")
+    import tkinter as tk
+
+    from batterytray.dialog import prepare_dialog
+
+    was_visible = gui_window.winfo_viewable()
+    gui_window.withdraw()
+    gui_window.update()
+
+    dialog = tk.Toplevel(gui_window)
+    try:
+        prepare_dialog(dialog, gui_window)
+        gui_window.update()
+        assert dialog.winfo_viewable() == 1, \
+            "the dialog has to be on screen while the main window is hidden"
+    finally:
+        dialog.destroy()
+        # The window is shared by the other tests, so it has to be put
+        # back the way it was found.
+        if was_visible:
+            gui_window.deiconify()
+        gui_window.update()
+
+
+def test_a_dialog_follows_the_main_window_when_it_is_shown(gui_window):
+    """A dialog of a window that is on screen belongs to that window."""
+    pytest.importorskip("tkinter")
+    import tkinter as tk
+
+    from batterytray.dialog import prepare_dialog
+
+    gui_window.deiconify()
+    gui_window.update()
+
+    dialog = tk.Toplevel(gui_window)
+    try:
+        prepare_dialog(dialog, gui_window)
+        gui_window.update()
+        assert dialog.winfo_viewable() == 1
+    finally:
+        dialog.destroy()
+
+
+def test_the_settings_dialog_opens_from_the_tray_menu(gui_window):
+    """The settings window has to open, even when the main window is hidden.
+
+    This is the path the user takes: right click on the tray icon and
+    choose "设置".
+    """
+    pytest.importorskip("tkinter")
+
+    from batterytray.settingsdialog import SettingsDialog
+
+    was_visible = gui_window.winfo_viewable()
+    gui_window.withdraw()
+    gui_window.update()
+
+    dialog = SettingsDialog(gui_window, Config(), "Segoe UI", 96.0)
+    try:
+        gui_window.update()
+        assert dialog.winfo_viewable() == 1, \
+            "the settings window has to show up from the tray menu"
+    finally:
+        dialog.destroy()
+        if was_visible:
+            gui_window.deiconify()
+        gui_window.update()
+
+
 def test_the_mouse_dialog_hands_its_work_to_the_tkinter_thread(gui_window):
     """The reader thread of the mouse dialog must not touch Tk itself.
 
@@ -2910,3 +2988,513 @@ def test_the_vxe_keyboard_status_packet_carries_the_level():
         bytes([0x04, 0x00, 0x00, 0x1A, 0x06, 0, 0, 0, 0, 1])) is None
     assert hidvendor._vxe_percent(
         bytes([0x04, 0x00, 0x00, 0x1A, 0x06, 0, 0, 0, 101, 1])) is None
+
+
+# ----------------------------------------------------------------------
+# The extra vendor protocols
+# ----------------------------------------------------------------------
+
+def _compx_answer(level: int, charging: int = 0) -> bytes:
+    """Builds the answer of a Compx 17 byte request."""
+    frame = bytearray(17)
+    frame[0] = 0x08
+    frame[1] = 0x04
+    frame[6] = level
+    frame[7] = charging
+    frame[16] = (0x55 - sum(frame[:16])) & 0xFF
+    return bytes(frame)
+
+
+def test_the_compx_frame_carries_a_valid_checksum():
+    """The whole 17 byte frame has to add up to 0x55."""
+    frame = vendor2._compx_frame(0x04)
+    assert len(frame) == 17
+    assert frame[0] == 0x08 and frame[1] == 0x04
+    assert sum(frame) & 0xFF == 0x55
+    # The shortest request of the protocol is 08 04 .. 49.
+    assert frame[16] == 0x49
+
+
+def test_the_compx_answer_gives_the_level_and_the_charging_flag():
+    """The level sits at byte 6 and the charging flag at byte 7."""
+    assert vendor2._parse_compx(_compx_answer(56)) == (56, False)
+    assert vendor2._parse_compx(_compx_answer(56, 1)) == (56, True)
+
+
+def test_a_compx_frame_with_a_wrong_checksum_is_not_a_battery_answer():
+    """The same collection carries other traffic, so the checksum matters."""
+    noise = bytearray(_compx_answer(56))
+    noise[3] = 0x3D
+    assert vendor2._parse_compx(bytes(noise)) is None
+
+    # A level of 116 is what a foreign frame produces without the checksum.
+    foreign = bytearray(17)
+    foreign[0] = 0x08
+    foreign[1] = 0x04
+    foreign[6] = 116
+    assert vendor2._parse_compx(bytes(foreign)) is None
+
+
+def test_both_aula_answer_shapes_are_recognised():
+    """The receiver answers with two shapes and both carry the level."""
+    answer = bytearray(20)
+    answer[0] = 0x13
+    answer[1] = 0x4A
+    answer[2] = 0x01
+    answer[4] = 0x02
+    answer[5] = 51
+    answer[6] = 0x10
+    assert vendor2._parse_aula(bytes(answer)) == (51, True)
+
+    answer = bytearray(20)
+    answer[0] = 0x13
+    answer[1] = 0x0A
+    answer[2] = 0x01
+    answer[4] = 0x04
+    answer[5] = 0x05
+    answer[6] = 96
+    answer[7] = 0x01
+    assert vendor2._parse_aula(bytes(answer)) == (96, False)
+
+
+def test_a_foreign_aula_frame_is_not_read_as_a_battery_level():
+    """A frame of another shape must not be taken for an answer."""
+    answer = bytearray(20)
+    answer[0] = 0x13
+    answer[1] = 0x0A
+    answer[4] = 0x02
+    assert vendor2._parse_aula(bytes(answer)) is None
+
+
+def test_the_aula_frame_carries_the_sum_of_its_bytes():
+    """The last byte of the frame is the low byte of the sum."""
+    frame = vendor2._aula_frame(bytes([0xCA]))
+    assert frame[0] == 0x13 and frame[1] == 0xCA
+    assert frame[19] == sum(frame[:19]) & 0xFF
+
+
+def test_the_keychron_status_packet_carries_the_level():
+    """The level is in byte 20, the charging flag is the top bit."""
+    answer = bytearray(64)
+    answer[0] = 0xB4
+    answer[1] = 0x06
+    answer[20] = 45
+    assert vendor2._parse_keychron(bytes(answer)) == (45, False)
+
+    answer[20] = 45 | 0x80
+    assert vendor2._parse_keychron(bytes(answer)) == (45, True)
+
+    # A command echo is not a battery answer.
+    answer[0] = 0xB3
+    assert vendor2._parse_keychron(bytes(answer)) is None
+
+
+def test_the_keychron_request_uses_the_documented_report_id():
+    """The request starts with the report id 0xB3 and the command 0x06."""
+    request = vendor2._keychron_request()
+    assert request[0] == 0xB3
+    assert request[1] == 0x06
+
+
+def test_the_rapoo_status_packet_carries_the_level():
+    """The level is in byte 8 of the 0x07 status packet."""
+    answer = bytearray(19)
+    answer[0] = 0x07
+    answer[1] = 0x20
+    answer[7] = 0x01
+    answer[8] = 73
+    assert vendor2._parse_rapoo(bytes(answer)) == (73, False)
+
+    # A few interfaces prepend an alignment byte.
+    padded = bytes([0x00]) + bytes(answer)
+    assert vendor2._parse_rapoo(padded) == (73, False)
+
+    # Another report on the same collection is not a status packet.
+    assert vendor2._parse_rapoo(bytes(19)) is None
+
+
+def test_the_mchose_request_is_inverted():
+    """Every byte of the payload is sent inverted."""
+    request = vendor2._mchose_request(vendor2.MCHOSE_CMD_DEVICE_INFO)
+    assert request[0] == vendor2.MCHOSE_REPORT_CONTROL
+    assert request[1] == vendor2.MCHOSE_CMD_DEVICE_INFO ^ 0xFF
+    assert request[2] == 0xFF
+
+
+def test_the_mchose_answer_carries_the_level_and_the_charging_flag():
+    """The device information answers with the level at byte 9."""
+    payload = bytearray(vendor2.MCHOSE_PAYLOAD)
+    payload[0] = 0x34
+    payload[1] = 0x12
+    payload[9] = 68
+    payload[10] = 1
+    answer = bytes([vendor2.MCHOSE_REPORT_CONTROL,
+                     vendor2.MCHOSE_CMD_DEVICE_INFO ^ 0xFF]) + \
+        bytes(b ^ 0xFF for b in payload)
+    decoded = vendor2._parse_mchose(answer, vendor2.MCHOSE_CMD_DEVICE_INFO)
+    assert decoded is not None
+    assert decoded[9] == 68
+    assert decoded[10] == 1
+
+
+def test_a_mchose_answer_with_the_wrong_echo_is_rejected():
+    """The command echo tells a stale buffer apart from a real answer."""
+    payload = bytes(vendor2.MCHOSE_PAYLOAD)
+    answer = bytes([vendor2.MCHOSE_REPORT_CONTROL, 0x00]) + \
+        bytes(b ^ 0xFF for b in payload)
+    assert vendor2._parse_mchose(answer, vendor2.MCHOSE_CMD_DEVICE_INFO) is None
+
+
+def test_the_lamzu_answer_carries_the_level():
+    """The level is in byte 8 and the charging flag in byte 7."""
+    answer = bytearray(65)
+    answer[1] = 0xA1
+    answer[6] = 0x83
+    answer[7] = 0x01
+    answer[8] = 82
+    assert vendor2._parse_lamzu(bytes(answer)) == (82, True)
+
+    answer[8] = 0
+    assert vendor2._parse_lamzu(bytes(answer)) is None
+
+
+def test_the_ninjutso_answer_carries_the_level():
+    """The level is in byte 9, the charging flag in byte 10."""
+    answer = bytearray(32)
+    answer[9] = 64
+    answer[10] = 1
+    assert vendor2._parse_ninjutso(bytes(answer)) == (64, True)
+
+    answer[11] = 1
+    assert vendor2._parse_ninjutso(bytes(answer)) == (64, True)
+
+
+def test_the_hyperx_level_is_a_bucket_of_ten_percent():
+    """The Cloud Flight reports the level in steps of ten percent."""
+    answer = bytearray(20)
+    answer[0] = 0x21
+    answer[1] = 0xFF
+    answer[2] = 0x05
+    answer[3] = 0x10
+    answer[4] = 7
+    assert vendor2._parse_hyperx(bytes(answer)) == (70, True)
+
+    answer[3] = 0x01
+    assert vendor2._parse_hyperx(bytes(answer)) == (70, False)
+
+
+def test_the_bloody_status_report_carries_the_level():
+    """The level is in byte 2 and the wired flag in byte 3."""
+    answer = bytes([0x06, 0x56, 60, 0x01])
+    assert vendor2._parse_bloody(answer) == (60, True)
+
+    # 255 means the radio link is down, so it is not a reading.
+    assert vendor2._parse_bloody(bytes([0x06, 0x56, 0xFF, 0x00])) is None
+
+
+def test_the_attack_shark_level_counts_in_steps_of_ten():
+    """The dongle pushes the level in steps of ten percent."""
+    answer = bytes([0x00, 0x00, 0x00, 0x00, 6])
+    assert vendor2._parse_attack_shark(answer) == (60, False)
+
+    assert vendor2._parse_attack_shark(bytes([0, 0, 0, 0, 0])) is None
+    assert vendor2._parse_attack_shark(bytes([0, 0, 0, 0, 11])) is None
+
+
+def test_the_steelseries_legacy_answer_carries_the_level():
+    """Every model has its own command and its own level position."""
+    spec = vendor2.STEELSERIES_LEGACY[0x12B3]
+    answer = bytearray(8)
+    answer[2] = 0x00
+    answer[3] = 71
+    assert vendor2._parse_steelseries_legacy(bytes(answer), spec) == (71, False)
+
+    # The status byte marks a device that is switched off.
+    answer[2] = 0x01
+    assert vendor2._parse_steelseries_legacy(bytes(answer), spec) is None
+
+
+def test_the_steelseries_nova_level_is_a_bucket_for_some_models():
+    """A few Nova models report the level in steps of a quarter."""
+    answer = bytearray(64)
+    answer[0] = 0x20
+    answer[2] = 3
+    answer[3] = 0x02
+    assert vendor2._parse_steelseries_nova(bytes(answer), False) == (3, True)
+    assert vendor2._parse_steelseries_nova(bytes(answer), True) == (75, True)
+
+    # A status of zero means the device is switched off.
+    answer[3] = 0x00
+    assert vendor2._parse_steelseries_nova(bytes(answer), False) is None
+
+
+def test_the_pulsar_xs1_frame_carries_a_valid_checksum():
+    """The two byte checksum covers the frame without its last two bytes."""
+    request = vendor2._xs1_request(vendor2.PULSAR_XS1_CMD_BATTERY)
+    assert request[0] == vendor2.PULSAR_XS1_REPORT_ID
+    frame = request[1:]
+    assert frame[1:4] == bytes(vendor2.PULSAR_XS1_CMD_BATTERY)
+    assert frame[-2:] == vendor2._xs1_checksum(bytes(frame))
+
+
+def test_the_pulsar_xs1_answer_gives_the_level():
+    """The level sits in byte 6 of the answered frame."""
+    frame = bytearray(vendor2.PULSAR_XS1_FRAME)
+    frame[0] = vendor2.PULSAR_XS1_STATUS_ANSWER
+    frame[1] = vendor2.PULSAR_XS1_CMD_BATTERY[0]
+    frame[2] = vendor2.PULSAR_XS1_CMD_BATTERY[1]
+    frame[6] = 88
+    frame[-2:] = vendor2._xs1_checksum(bytes(frame))
+    answer = bytes([0]) + bytes(frame)
+    parsed = vendor2._xs1_payload(answer, vendor2.PULSAR_XS1_CMD_BATTERY)
+    assert parsed is not None
+    assert parsed[6] == 88
+
+
+def test_every_extra_protocol_is_bound_to_its_vendor():
+    """A protocol must never be tried on an unrelated HID interface."""
+    for protocol in vendor2.PROTOCOLS:
+        assert protocol.usage_page
+        assert protocol.name
+        if protocol.vendor_ids:
+            assert all(vid for vid in protocol.vendor_ids)
+
+
+def test_the_lofree_transaction_uses_its_three_steps():
+    """The transaction is a start frame, a command frame and an end frame."""
+    start = vendor2._lofree_frame(vendor2.LOFREE_START)
+    assert start[0] == vendor2.LOFREE_REPORT_ID
+    assert start[3] == vendor2.LOFREE_START
+
+    end = vendor2._lofree_frame(vendor2.LOFREE_END)
+    assert end[3] == vendor2.LOFREE_END
+
+    command = vendor2._lofree_command(vendor2.LOFREE_CMD_BATTERY)
+    assert command[0] == vendor2.LOFREE_REPORT_ID
+    assert command[3] == vendor2.LOFREE_CMD_BATTERY
+    assert len(command) == vendor2.LOFREE_FRAME
+
+
+def test_the_lofree_answer_carries_the_level():
+    """The level sits at the data offset of the answer."""
+    payload = bytearray(vendor2.LOFREE_FRAME - 1)
+    payload[2] = vendor2.LOFREE_CMD_BATTERY
+    payload[vendor2.LOFREE_DATA_AT] = 63
+    assert vendor2._parse_lofree(bytes(payload)) == (63, False)
+
+
+def test_a_lofree_answer_without_a_level_is_refused():
+    """A level outside 0..100 is not a battery level."""
+    payload = bytearray(vendor2.LOFREE_FRAME - 1)
+    payload[2] = vendor2.LOFREE_CMD_BATTERY
+    payload[vendor2.LOFREE_DATA_AT] = 120
+    assert vendor2._parse_lofree(bytes(payload)) is None
+
+
+def test_the_nzxt_request_asks_for_the_telemetry_property():
+    """The request reads the telemetry property of the mouse."""
+    request = vendor2._nzxt_request()
+    assert request[0] == vendor2.NZXT_MAGIC
+    assert request[1] == vendor2.NZXT_TARGET_MOUSE
+    assert request[2] == vendor2.NZXT_OP_READ
+    assert request[4] == vendor2.NZXT_PROP_TELEMETRY
+
+
+def test_the_nzxt_answer_carries_the_level_and_the_charging_flag():
+    """The level is a little endian value at bytes 17 and 18."""
+    answer = bytearray(64)
+    answer[0] = vendor2.NZXT_MAGIC
+    answer[1] = vendor2.NZXT_TARGET_MOUSE
+    answer[2] = vendor2.NZXT_REPLY_TELEMETRY
+    answer[17] = 77
+    answer[18] = 0
+    assert vendor2._parse_nzxt(bytes(answer)) == (77, False)
+
+    answer[22] = 0x01
+    assert vendor2._parse_nzxt(bytes(answer)) == (77, True)
+
+
+def test_the_nzxt_answer_has_to_be_the_telemetry_one():
+    """The acknowledgement of the dongle is not a battery answer."""
+    answer = bytearray(64)
+    answer[0] = vendor2.NZXT_MAGIC
+    answer[1] = vendor2.NZXT_ACK
+    assert vendor2._parse_nzxt(bytes(answer)) is None
+
+
+def test_the_asus_keyboard_request_asks_for_the_power():
+    """The request is the report id and the 12 01 command."""
+    request = vendor2._asus_request()
+    assert request[0] == 0x00
+    assert request[1] == vendor2.ASUS_CMD_POWER
+    assert request[2] == vendor2.ASUS_SUB_POWER
+    assert len(request) == 65
+
+
+def test_the_asus_keyboard_answer_carries_the_level():
+    """The level is in byte 6 and the charging flag in byte 9."""
+    answer = bytearray(65)
+    answer[1] = vendor2.ASUS_CMD_POWER
+    answer[2] = vendor2.ASUS_SUB_POWER
+    answer[6] = 82
+    assert vendor2._parse_asus(bytes(answer)) == (82, False)
+
+    answer[9] = 1
+    assert vendor2._parse_asus(bytes(answer)) == (82, True)
+
+
+def test_the_asus_keyboard_answer_is_read_with_and_without_the_report_id():
+    """hidapi leaves the report id out when it is zero and keeps it otherwise."""
+    # Without the report id: the answer starts with the command itself.
+    stripped = bytearray(64)
+    stripped[0] = vendor2.ASUS_CMD_POWER
+    stripped[1] = vendor2.ASUS_SUB_POWER
+    stripped[5] = 55
+    assert vendor2._parse_asus(bytes(stripped)) == (55, False)
+
+    # With the report id in front: the level is one byte further.
+    with_id = bytearray(65)
+    with_id[1] = vendor2.ASUS_CMD_POWER
+    with_id[2] = vendor2.ASUS_SUB_POWER
+    with_id[6] = 55
+    assert vendor2._parse_asus(bytes(with_id)) == (55, False)
+
+
+def test_a_sleeping_asus_keyboard_is_not_read_as_empty():
+    """A level of zero without charging means the keyboard is asleep."""
+    answer = bytearray(65)
+    answer[1] = vendor2.ASUS_CMD_POWER
+    answer[2] = vendor2.ASUS_SUB_POWER
+    assert vendor2._parse_asus(bytes(answer)) is None
+
+
+def test_the_falchion_family_reads_the_level_from_byte_eleven():
+    """The Falchion reports a gauge in byte 6 and the level in byte 11."""
+    answer = bytearray(65)
+    answer[1] = vendor2.ASUS_CMD_POWER
+    answer[2] = vendor2.ASUS_SUB_POWER
+    answer[6] = 8
+    answer[11] = 80
+
+    assert vendor2._asus_level_byte(0x193C) == vendor2.ASUS_FALCHION_LEVEL_AT
+    assert vendor2._parse_asus(bytes(answer), vendor2.ASUS_FALCHION_LEVEL_AT) \
+        == (80, False)
+
+    # Another family keeps the level in byte 6.
+    assert vendor2._asus_level_byte(0x196B) == vendor2.ASUS_LEVEL_AT
+
+
+def test_the_omni_pair_list_names_the_keyboard():
+    """The pair list of the receiver holds the id of the keyboard."""
+    answer = bytearray(64)
+    answer[0] = vendor2.ASUS_OMNI_PAIRS_REPORT_ID
+    answer[1] = vendor2.ASUS_OMNI_PAIRS_COMMAND
+    answer[5] = 0x85
+    answer[6] = 0x1A
+    pids = vendor2._parse_asus_pairs(bytes(answer))
+    assert pids == [0x1A85]
+    assert 0x1A85 in vendor2.ASUS_OMNI_KEYBOARDS
+
+
+def test_a_frame_that_is_not_the_pair_list_is_refused():
+    """Another frame must not be read as a pair list."""
+    answer = bytearray(64)
+    answer[0] = 0x02
+    answer[1] = 0x12
+    answer[2] = 0x01
+    assert vendor2._parse_asus_pairs(bytes(answer)) == []
+
+
+def test_the_omni_keyboard_uses_its_own_report_id():
+    """The keyboard channel of the Omni receiver starts with 0x02."""
+    assert vendor2.ASUS_OMNI_REPORT_ID == 0x02
+    request = vendor2._asus_request(vendor2.ASUS_OMNI_REPORT_ID)
+    assert request[0] == vendor2.ASUS_OMNI_REPORT_ID
+    assert request[1] == vendor2.ASUS_CMD_POWER
+    assert request[2] == vendor2.ASUS_SUB_POWER
+
+
+def test_the_asus_keyboard_protocol_stays_away_from_the_rog_mice():
+    """The ROG mice use their own collection, so the keyboard query skips them.
+
+    Without the product id list the keyboard protocol would also answer for
+    the mouse behind the Omni receiver and the two drivers would fight over
+    the same collection.
+    """
+    keyboard = [p for p in vendor2.PROTOCOLS if p.name == "ASUS ROG 键盘"][0]
+    assert keyboard.product_ids
+    assert 0x1A68 not in keyboard.product_ids
+    assert 0x1A66 not in keyboard.product_ids
+
+    for product_id in keyboard.product_ids:
+        model = devices.lookup(0x0B05, product_id)
+        assert model is not None, hex(product_id)
+        assert model.kind == "keyboard", model.name
+
+
+def test_the_model_table_never_claims_an_unknown_model():
+    """Every model needs a name and a kind, and the ids have to be sane."""
+    for (vendor_id, product_id), model in devices.MODELS.items():
+        assert 0 < vendor_id <= 0xFFFF
+        assert 0 < product_id <= 0xFFFF
+        assert model.name
+        assert model.kind in ("mouse", "keyboard", "headset", "controller")
+
+
+def test_the_model_table_finds_the_known_models():
+    """A few well known models have to be found by their USB id."""
+    assert devices.lookup(0x373B, 0x10C9).name == "ATK X1 SE"
+    assert devices.lookup(0x3554, 0xFA09).kind == "keyboard"
+    assert devices.lookup(0x3434, 0xD056).name == "Keychron M7 8K 鼠标"
+    assert devices.lookup(0x1038, 0x12EC).kind == "headset"
+    assert devices.lookup(0x0000, 0x0000) is None
+
+
+def test_a_keyboard_behind_the_omni_receiver_is_not_a_receiver():
+    """The Azoth keeps its own name, the receiver carries the keyboards.
+
+    Both used to be registered under the same product id, so the keyboard
+    that was plugged in directly was shown as a receiver and never made it
+    past the filter for the kinds the user picked.
+    """
+    azoth = devices.lookup(0x0B05, 0x1A85)
+    assert azoth.name == "ASUS ROG Azoth 键盘"
+    assert azoth.kind == "keyboard"
+
+    receiver = devices.lookup(0x0B05, 0x1ACE)
+    assert receiver.kind == "keyboard"
+
+
+def test_every_model_kind_can_be_shown_by_the_app():
+    """A model the app cannot show would be invisible to the user."""
+    from batterytray.config import ALL_KINDS
+
+    for model in devices.MODELS.values():
+        assert model.kind in ALL_KINDS, model.name
+
+
+def test_two_drivers_never_claim_the_same_device():
+    """A device that two protocols answer for would be read twice.
+
+    The same vendor collection is sometimes shared by two designs — the AULA
+    keyboards answer with the 20 byte frame while the VXE mice answer with
+    the 17 byte one — so the protocols have to be told apart by their
+    product id.
+    """
+    claims: dict[tuple, list[str]] = {}
+
+    def claim(vendor_id, usage_page, product_ids, name):
+        for product_id in product_ids or (None,):
+            key = (vendor_id, usage_page, product_id)
+            claims.setdefault(key, []).append(name)
+
+    for protocol in vendor2.PROTOCOLS:
+        for vendor_id in protocol.vendor_ids:
+            claim(vendor_id, protocol.usage_page, protocol.product_ids,
+                  protocol.name)
+    for protocol in hidvendor.PROTOCOLS:
+        claim(protocol.vendor_id, protocol.usage_page, protocol.product_ids,
+              protocol.name)
+
+    for key, names in claims.items():
+        assert len(names) == 1, (key, names)

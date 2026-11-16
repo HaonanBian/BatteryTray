@@ -8,12 +8,14 @@ Windows 托盘电量显示工具 —— 在系统托盘里查看**鼠标、键�
 
 | 版本 | 文件 | 说明 |
 |------|------|------|
-| **安装版（推荐）** | [`BatteryTray-Setup-1.1.0.exe`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.1.0/BatteryTray-Setup-1.1.0.exe) | 带安装向导，装完自带开始菜单快捷方式和卸载程序 |
-| **便携版** | [`BatteryTray-1.1.0-portable.zip`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.1.0/BatteryTray-1.1.0-portable.zip) | 解压即用，免安装 |
+| **安装版（推荐）** | [`BatteryTray-Setup-1.2.0.exe`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.2.0/BatteryTray-Setup-1.2.0.exe) | 带安装向导，装完自带开始菜单快捷方式和卸载程序 |
+| **便携版** | [`BatteryTray-1.2.0-portable.zip`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.2.0/BatteryTray-1.2.0-portable.zip) | 解压即用，免安装 |
 
-> 免安装用户也可以直接下载 [`BatteryTray-1.1.0.exe`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.1.0/BatteryTray-1.1.0.exe)（单文件版，双击即运行）。
+> 免安装用户也可以直接下载 [`BatteryTray-1.2.0.exe`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.2.0/BatteryTray-1.2.0.exe)（单文件版，双击即运行）。
 >
 > 想要**每个设备一根电量条**还是**只显示最危险的那个**，在设置里一键切换。
+>
+> 旧版本在 [Releases](https://github.com/HaonanBian/BatteryTray/releases) 里可以找到。
 
 📖 完整功能介绍见 **[FEATURES.md](FEATURES.md)**。
 
@@ -21,7 +23,7 @@ Windows 托盘电量显示工具 —— 在系统托盘里查看**鼠标、键�
 
 - 直接通过 USB HID 读取 **雷蛇毒蝰 V3 Pro** 和 **ROG 月刃无线 AimPoint（Keris Wireless AimPoint）** 的电量，**不需要装雷蛇 Synapse / 奥创中心**，不需要内核驱动，不需要管理员权限
 - **直接在软件里改鼠标参数** —— DPI、回报率、DPI 挡位、按键映射，全部写进鼠标板载，关掉软件甚至换台电脑都还在
-- **多品牌电量** —— 罗技 HID++（鼠标 + 键盘）、ATK/VXE/VGN、Endgame Gear、VAXEE/ZYGEN、Nordic nRF 2.4G 设备
+- **多品牌电量** —— 罗技 HID++（鼠标 + 键盘）、ATK/VXE/VGN、Endgame Gear、VAXEE/ZYGEN、Nordic nRF 2.4G 设备，以及 AULA、MCHOSE、Keychron、Pulsar、Lamzu、Ninjutso、Bloody、HyperX、SteelSeries、Lofree、NZXT、ASUS ROG 键盘等 20+ 个品牌
 - 通过 Windows 蓝牙协议栈读取**蓝牙耳机**电量
 - **每台在线设备一个托盘图标**：鼠标 / 键盘 / 耳机轮廓，外面一圈环形电量表；**圆环颜色和电量颜色一致**（绿色充足、橙色中等、红色低电、蓝色充电）
 - **左键点击托盘图标**弹出竖排列表：每行是**托盘同款环形图标 + 设备名 + 精确百分比**，点别处自动收起
@@ -181,10 +183,23 @@ Windows 把电量写进设备节点后**不会清除**。耳机关机、超出�
 | VXE V75 Pro 无线键盘 | 从厂商状态通知读取电量，只读 |
 | Endgame Gear / VAXEE / ZYGEN | 2.4G 接收器，只读电量 |
 | Nordic nRF 方案无线设备 | 通用 2.4G 接收器，只读电量 |
+| AULA / LEOBOG / 狼蛛 / 凌豹 | 20 字节帧协议，键盘和鼠标都支持，只读电量 |
+| MCHOSE 无线鼠标 / 耳机 | 厂商控制集合，载荷逐位取反，只读电量 |
+| Keychron 无线鼠标 / 键盘 | 厂商集合 `0xFFC1`，只读电量 |
+| Pulsar 无线鼠标 | XS-1 的 65 字节 feature 帧，只读电量 |
+| Attack Shark / 雷柏 | 接收器主动推送状态包，只读电量 |
+| Lamzu / Ninjutso / Bloody | 厂商 feature 报告，只读电量 |
+| HyperX 无线耳机 | 20 字节 `21 FF 05` 帧，只读电量 |
+| SteelSeries 耳机 | Arctis / Nova / GameBuds 家族，只读电量 |
+| Lofree Hyzen 键盘 | 2.4G 接收器上的三段式事务，只读电量 |
+| NZXT Lift Elite 无线鼠标 | 2.4G 接收器与 USB 线，两种连接同一个图标，只读电量 |
+| ASUS ROG 键盘 | Falchion / Azoth / Strix Scope / Claymore II 等家族，只读电量 |
 | 蓝牙耳机 | 通过 HFP 上报电量的设备（Sony、WH-CH720N 等） |
 | 蓝牙手柄 / 键鼠 | 可在**设置窗口**里勾选开启 |
 
 默认只显示鼠标和耳机，手柄和键盘要在设置里打开。新增品牌目前只读取电量；DPI、回报率和改键仍只对雷蛇和 ROG 月刃开放。
+
+完整的品牌与协议清单见 **[FEATURES.md](FEATURES.md)** 的「支持的品牌与协议」一节。
 
 ### 罗技 HID++ 2.0
 
@@ -195,6 +210,31 @@ Windows 把电量写进设备节点后**不会清除**。耳机关机、超出�
 ATK/VXE/VGN、Endgame Gear、VAXEE/ZYGEN 和 Nordic nRF 方案的协议定义集中在 `batterytray/drivers/hidvendor.py`，按「VID + usage page」精确匹配，不会误开其他厂商的接口。只发读电量命令，不写任何设置。
 
 VXE V75 Pro 键盘例外：它使用 `320F:5088` 的 `0xFF1C` 厂商集合，请求报文是 64 字节的 `04 .. .. 1A 06`；回复里第 8 字节是电量、第 9 字节是充电状态。键盘休眠时会短暂不响应，按一下键盘再刷新即可。
+
+### 二十多个厂商协议
+
+`batterytray/drivers/vendor2.py` 收录了另外二十来种厂商协议的只读实现，同样只发读电量命令：
+
+| 协议族 | 覆盖的品牌 | 报文特征 |
+|--------|-----------|---------|
+| Compx 17 字节 | ATK / VXE / VGN / Pulsar / Scyrox / 达尔优 / G-Wolves / Zaopin | `08 04` 开头，17 字节求和等于 `0x55` |
+| AULA 20 字节 | AULA / LEOBOG / 狼蛛 / 凌豹 / 迈从 / Incott | `13` 开头，末字节是前面字节的低位和 |
+| Keychron | Keychron M5 / M6 / M7 | 厂商页 `0xFFC1`，`B3 06` 查询，第 20 字节是电量 |
+| Pulsar XS-1 | Pulsar | 65 字节 feature 帧，双字节校验和 |
+| MCHOSE | MCHOSE 鼠标 / 耳机 | 载荷逐位取反，`0x06` 设备信息命令 |
+| Lamzu | Lamzu | 65 字节 feature 报告 |
+| Ninjutso | Ninjutso / NINX | 32 字节 Nordic feature 报告 |
+| Bloody | A4Tech Bloody | `80 FF 00` 命令，回复 `06 56` |
+| HyperX | Cloud Alpha / III 无线耳机 | `21 FF 05` 输出报告 |
+| SteelSeries | Arctis / Nova / GameBuds | `00 20`（Nova）与各家命令表 |
+| Rapoo | 雷柏 | 接收器主动推送 `07` 状态包 |
+| Attack Shark | Attack Shark | 接收器主动推送，电量按 10% 步进 |
+| Lofree | Lofree Hyzen 键盘 | `0xFF1C:0x92` 上的三段式事务 |
+| NZXT | NZXT Lift Elite 无线鼠标 | `0xFFCA:0x0001`，`4E` 开头的 64 字节帧 |
+| ASUS ROG | Falchion / Azoth / Strix Scope / Claymore II 等 | `12 01` 电量查询，第 6 字节是电量 |
+| HID 标准电池页 | 通用 | usage page `0x06` / usage `0x20` 兜底 |
+
+协议的具体报文格式和来源项目都写在 `vendor2.py` 里每个协议块的注释中，可以对着源码核对。
 
 ### 设备类型是怎么判断的
 
@@ -304,6 +344,8 @@ batterytray/
     ├── mouseadapter.py # 把不同厂商驱动包成同一套接口
     ├── logitech.py   # 罗技 HID++ 2.0 电量（鼠标 / 键盘）
     ├── hidvendor.py  # ATK/VXE、Endgame、VAXEE、Nordic 电量协议
+    ├── vendor2.py    # 另外二十来种厂商协议（只读电量）
+    ├── devices.py    # 型号名称库（VID/PID → 友好名称）
     └── bluetooth.py  # 蓝牙 PnP 电量属性
 ```
 
@@ -336,7 +378,15 @@ batterytray/
 - [yszyszysz233/2.4G-battery-viewer](https://github.com/yszyszysz233/2.4G-battery-viewer) —— Hands-Free 节点属性的关键说明
 - [1972863663/Viper-Control-Lite](https://github.com/1972863663/Viper-Control-Lite) —— MIT 协议的毒蝰 V3 Pro 参数工具，DPI 与回报率命令的参考实现
 - [MatthewSaintBull/freenapse](https://github.com/MatthewSaintBull/freenapse) —— 专门针对毒蝰 V3 Pro 的开源工具，鼠标休眠问题的踩坑记录很有价值
-- [seerge/g-helper](https://github.com/seerge/g-helper) —— ROG 鼠标 HID 协议的主要参考，覆盖 30 多款华硕鼠标，已在真机验证
+- [seerge/g-helper](https://github.com/seerge/g-helper) —— ROG 鼠标与键盘 HID 协议的主要参考，覆盖 30 多款华硕设备，已在真机验证
+- [HeyOkay/HaloBattery](https://github.com/HeyOkay/HaloBattery) —— 二十多种厂商协议的实现与逐字节的验证记录，AULA / MCHOSE / Lofree / NZXT / ASUS 等协议的来源
+- [435311382/Volt](https://github.com/435311382/Volt) —— Compx 帧族与型号表
+- [fisher44123/volt-battery-monitor](https://github.com/fisher44123/volt-battery-monitor) —— Compx 与狼蛛帧格式
+- [mammadow/keychron-battery-tray](https://github.com/mammadow/keychron-battery-tray) —— Keychron 厂商集合协议
+- [incconutwo/mouse-battery-tray](https://github.com/incconutwo/mouse-battery-tray) —— WLmouse 与 Pulsar 帧
+- [ryanlewis/mousebatt](https://github.com/ryanlewis/mousebatt) —— Pulsar XS-1 帧与校验和
+- [LORQAQ/mchose-tray](https://github.com/LORQAQ/mchose-tray) —— MCHOSE 控制集合与取反载荷
+- [VoltWalt/scyrox-v6-kde-battery](https://github.com/VoltWalt/scyrox-v6-kde-battery) —— Compx 帧与校验和
 - [pwr-Solaar/Solaar](https://github.com/pwr-Solaar/Solaar) —— 罗技 HID++ 2.0 电量、充电状态和设备名称的协议来源
 - [yszyszysz233/2.4G-battery-viewer](https://github.com/yszyszysz233/2.4G-battery-viewer) —— ATK/VXE、Endgame、VAXEE、Nordic 等 2.4G 电量协议
 - [CalcProgrammer1/OpenRGB](https://gitlab.com/CalcProgrammer1/OpenRGB/-/merge_requests/2316) —— 月刃 AimPoint 的 VID/PID 与灯效命令参考

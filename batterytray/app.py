@@ -16,7 +16,8 @@ import pystray
 
 from . import autostart, singleton
 from .config import Config, config_dir
-from .drivers import asusmouse, bluetooth, hidvendor, logitech, razer
+from .drivers import (asusmouse, bluetooth, hidvendor, logitech, razer,
+                      vendor2)
 from .icon import DeviceState, build_device_icon, build_icon
 
 
@@ -160,6 +161,21 @@ def collect_devices(config: Config) -> list[Device]:
             product_id=vendor_device.product_id,
             connection=vendor_device.connection,
             connected=vendor_device.connected,
+        ))
+
+    for extra_device in vendor2.read_devices():
+        # The same peripheral can be found by two drivers, e.g. when it is
+        # reachable over both a 2.4G receiver and a cable. The first
+        # reading that arrives is the one that is shown.
+        if any(d.name.lower() == extra_device.name.lower() for d in devices):
+            continue
+        devices.append(Device(
+            name=extra_device.name,
+            percent=extra_device.percent,
+            charging=extra_device.charging,
+            kind=extra_device.kind,
+            product_id=extra_device.product_id,
+            connection=extra_device.connection,
         ))
 
     for bt_device in bluetooth.read_devices():

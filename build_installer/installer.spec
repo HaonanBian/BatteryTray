@@ -8,7 +8,7 @@ a = Analysis(
     pathex=['D:\\Desktop\\a'],
     binaries=[],
     datas=[
-        ('D:\\Desktop\\a\\out_test\\dist\\BatteryTray.exe', 'payload'),
+        ('D:\\Desktop\\a\\dist\\BatteryTray.exe', 'payload'),
         ('D:\\Desktop\\a\\assets\\batterytray.ico', 'payload/assets'),
         ('D:\\Desktop\\a\\assets\\batterytray.png', 'payload/assets'),
         ('D:\\Desktop\\a\\README.md', 'payload'),

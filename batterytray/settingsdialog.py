@@ -11,8 +11,8 @@ import tkinter as tk
 from tkinter import font as tkfont
 
 from .config import Config
+from .dialog import prepare_dialog
 from .dpi import scale_font, scale_pixels
-from .dwm import style_window
 
 BG = "#111113"
 BG_CARD = "#1C1D20"
@@ -62,11 +62,7 @@ class SettingsDialog(tk.Toplevel):
         self.title("BatteryTray 设置")
         self.configure(bg=BG)
         self.resizable(False, False)
-        self.attributes("-topmost", True)
-        self.transient(master)
-        # The title bar of Windows is white and does not fit to the dark
-        # dialog.
-        style_window(self)
+        prepare_dialog(self, master)
 
         pad = scale_pixels(20, dpi)
         f = lambda pt: scale_font(pt, dpi)  # noqa: E731

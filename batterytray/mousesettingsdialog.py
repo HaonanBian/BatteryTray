@@ -21,6 +21,7 @@ import tkinter as tk
 from dataclasses import dataclass
 from tkinter import font as tkfont
 
+from .dialog import prepare_dialog
 from .drivers import mouseadapter, mouseconfig
 from .drivers.mouseconfig import (
     DpiStage,
@@ -29,7 +30,6 @@ from .drivers.mouseconfig import (
     MouseConfigError,
     MouseController,
 )
-from .dwm import style_window
 from .dpi import scale_font, scale_pixels
 
 BG = "#111113"
@@ -90,9 +90,7 @@ class ConfirmDialog(tk.Toplevel):
         self.title(title)
         self.configure(bg=BG)
         self.resizable(False, False)
-        self.attributes("-topmost", True)
-        self.transient(master)
-        style_window(self)
+        prepare_dialog(self, master)
 
         s = lambda px: scale_pixels(px, dpi)  # noqa: E731
         f = lambda pt: scale_font(pt, dpi)  # noqa: E731
@@ -187,11 +185,7 @@ class MouseSettingsDialog(tk.Toplevel):
         self.title(f"鼠标设置 — {device_name}")
         self.configure(bg=BG)
         self.resizable(False, False)
-        self.attributes("-topmost", True)
-        # The title bar of Windows is white and does not fit to the dark
-        # dialog.
-        style_window(self)
-        self.transient(master)
+        prepare_dialog(self, master)
 
         self._build()
         self.update_idletasks()

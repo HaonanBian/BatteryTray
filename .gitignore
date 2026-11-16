@@ -19,3 +19,9 @@ dist/
 # Release artifacts are committed intentionally so they can be
 # downloaded directly from the repository (raw links).
 # release/*.exe is NOT ignored.
+
+# Probe output and reference dumps from the protocol research
+asukb.txt
+hid_h.txt
+mch5.txt
+pprovider.txt

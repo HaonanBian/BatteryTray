@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import tkinter as tk
 
+from .dialog import prepare_dialog
 from .dpi import scale_font, scale_pixels
-from .dwm import style_window
 
 BG = "#17181B"
 BG_FIELD = "#101113"
@@ -33,12 +33,7 @@ class RenameDialog(tk.Toplevel):
         self.title("重命名设备")
         self.configure(bg=BG)
         self.resizable(False, False)
-        # The dialog has to stay on top of the borderless popup.
-        self.attributes("-topmost", True)
-        self.transient(master)
-        # The title bar of Windows is white and does not fit to the dark
-        # dialog.
-        style_window(self)
+        prepare_dialog(self, master)
 
         pad = scale_pixels(18, dpi)
 

@@ -80,19 +80,53 @@ BatteryTray 常驻在 Windows 系统托盘，为每台在线设备显示一个**
 
 ## 支持的设备
 
-| 类型 | 说明 |
-|------|------|
-| 雷蛇无线鼠标 | 设备表共 **65 个型号**，transaction id 取自 OpenRazer 设备库 |
-| ROG 月刃无线 AimPoint | 有线 / 2.4G / Omni / 蓝牙；USB 和 2.4G 下可读电量并修改 DPI、回报率、按键 |
-| 罗技无线鼠标 / 键盘 | HID++ 2.0，支持 Unifying/Bolt 接收器多设备，只读电量 |
-| ATK / VXE / VGN 无线鼠标 | 两种 Nordic 方案，只读电量 |
-| VXE V75 Pro 无线键盘 | 厂商状态通知，只读电量 |
-| Endgame Gear / VAXEE / ZYGEN | 2.4G 接收器，只读电量 |
-| Nordic nRF 方案无线设备 | 通用 2.4G 接收器，只读电量 |
-| 蓝牙耳机 | 通过 HFP 上报电量的设备（Sony、WH-CH720N 等） |
-| 蓝牙手柄 / 键鼠 | 可在**设置窗口**里勾选开启 |
+### 已适配的品牌与型号一览
 
-> 默认只显示**鼠标**和**耳机**，手柄和键盘需要在设置里手动打开。
+| 品牌 | 类型 | 型号 / 系列 | 协议来源 |
+|------|------|------------|---------|
+| **雷蛇 Razer** | 鼠标 | 毒蝰 V3 Pro 等，设备表共 **65 个型号** | OpenRazer 设备库 |
+| **华硕 ROG** | 鼠标 | 月刃无线 AimPoint（Keris Wireless AimPoint） | g-helper |
+| **华硕 ROG** | 键盘 | Falchion（幻灵）系列、Claymore II（棱剑 II）、Azoth / Azoth Extreme（魔剑 / 魔剑 Extreme）、Strix Scope II 96、Strix Flare II、TUF Gaming K3、TX 98 | g-helper / HaloBattery |
+| **华硕 ROG** | 接收器 | Omni Receiver（Omni 接收器） | g-helper / HaloBattery |
+| **罗技 Logitech** | 鼠标 / 键盘 | Unifying / Bolt 接收器下的全部无线设备 | Solaar（HID++ 2.0） |
+| **ATK** | 鼠标 | A系列、eXceiver 无线鼠标 | Compx 帧 |
+| **VXE** | 鼠标 / 键盘 | V75 Pro 键盘、V 系列鼠标 | Compx 帧 / 厂商状态通知 |
+| **VGN** | 鼠标 | 铝翼、凤鸣等系列 | Compx 帧 |
+| **Pulsar** | 鼠标 | XS-1 无线鼠标 | 65 字节 feature 帧 |
+| **Scyrox** | 鼠标 | V6 / V6E 无线鼠标 | Compx 帧 |
+| **达尔优 DAREU** | 鼠标 | 无线系列 | Compx 帧 |
+| **G-Wolves** | 鼠标 | 无线系列 | Compx 帧 |
+| **AULA** | 鼠标 | 无线系列 | AULA 20 字节帧 |
+| **LEOBOG** | 鼠标 | 无线系列 | AULA 帧 |
+| **狼蛛** | 鼠标 | 无线系列 | AULA / Compx 帧 |
+| **凌豹** | 鼠标 | 无线系列 | AULA 帧 |
+| **迈从 Incott** | 鼠标 | 无线系列 | AULA 帧 |
+| **MCHOSE** | 鼠标 / 耳机 | G/M/K 系列鼠标、无线耳机 | 取反载荷帧 |
+| **Keychron** | 键盘 | M5 / M6 / M7 无线键盘 | 厂商集合 `0xFFC1` |
+| **Lamzu** | 鼠标 | OEM 无线鼠标 | 65 字节 feature 报告 |
+| **Ninjutso / NINX** | 鼠标 | 无线鼠标 | Nordic 32 字节 feature 报告 |
+| **Bloody** | 鼠标 / 键盘 | A4Tech Bloody 无线系列 | `80 FF 00` 命令帧 |
+| **HyperX** | 耳机 | Cloud Alpha / Cloud III 无线耳机 | `21 FF 05` 输出报告 |
+| **SteelSeries** | 耳机 | Arctis / Nova / GameBuds 系列 | `00 20` 等命令表 |
+| **雷柏 Rapoo** | 鼠标 / 键盘 | 2.4G 无线系列 | 接收器主动推送 `07` |
+| **Attack Shark** | 鼠标 | 无线系列 | 接收器主动推送 |
+| **Lofree** | 键盘 | Hyzen（矮轴）2.4G 键盘 | `0xFF1C:0x92` 三段式事务 |
+| **NZXT** | 鼠标 | Lift Elite 无线鼠标 | `0xFFCA:0x0001` 遥测帧 |
+| **Endgame Gear** | 鼠标 | 无线系列 | 2.4G 接收器 |
+| **VAXEE / ZYGEN** | 鼠标 | 无线系列 | 2.4G 接收器 |
+| **Nordic nRF** | 鼠标 / 键盘 | 通用 2.4G 接收器 | Nordic 特征报告 |
+| **HID 标准电池页** | 通用 | usage page `0x06` / usage `0x20` 的设备 | 标准 HID 电池页 |
+| **蓝牙** | 耳机 / 手柄 / 键鼠 | 通过 HFP 上报电量的设备（Sony、WH-CH720N 等） | Windows 蓝牙 PnP 属性 |
+
+> 键盘与手柄默认**不显示**，需要在设置窗口里手动勾选「键盘」「游戏手柄」。
+
+### 能力边界
+
+| 能力 | 范围 |
+|------|------|
+| 只读电量 | 上述除雷蛇、ROG 月刃外的全部设备 |
+| 读电量 + 改 DPI / 回报率 / 按键 | 雷蛇毒蝰 V3 Pro、ROG 月刃无线 AimPoint |
+| 设备型号库 | `batterytray/drivers/devices.py` 里维护 VID/PID → 友好名称 |
 
 ---
 
@@ -111,6 +145,41 @@ BatteryTray 常驻在 Windows 系统托盘，为每台在线设备显示一个**
 ROG 月刃无线 AimPoint 使用另一套 64 字节负载的 HID 报文，协议实现参考 [`seerge/g-helper`](https://github.com/seerge/g-helper)。`0x12` 读、`0x51` 写、`0x50` 配置/保存，每次写入后必须发 `0x50 0x03` 落盘。回包里会混入按键事件，读取时按 `report id + 命令族 + 子命令` 过滤。
 
 设备 ID：有线 `0x1A66`、2.4G `0x1A68`、蓝牙 `0x1A6A`、Omni `0x1ACE`。控制接口在 `MI_00`，Omni 在 `MI_02&Col03`。本体回报率上限 1000 Hz，2000 Hz 以上属于其他接收器型号。
+
+### 二十多个厂商协议：统一在一张协议表里驱动
+
+`batterytray/drivers/vendor2.py` 把二十来种厂商协议统一成同一张表，每条记录声明 **VID、usage page、usage、报文字节数、读写长度、优先级**，运行时按优先级依次尝试，谁先答上就用谁：
+
+```python
+Protocol(name="Lofree 2.4G", vendor_ids=(0x388D,),
+         usage_page=LOFREE_USAGE_PAGE, usage=LOFREE_USAGE,
+         mode="output", length=LOFREE_FRAME, read_length=LOFREE_FRAME,
+         priority=58),
+```
+
+三类报文形态：
+
+| 形态 | 代表协议 | 做法 |
+|------|---------|------|
+| 一次性输出 + 等回复 | ASUS ROG 键盘、NZXT Lift Elite、Keychron | 发固定查询帧，按 feature report 读回并校验 |
+| 三段式事务 | Lofree Hyzen | `START` → `命令` → `END`，中途任何一步没回应就放弃 |
+| 接收器主动推送 | 雷柏、Attack Shark | 不发查询，直接监听接收器周期上报的状态包 |
+
+只读不写：所有协议只发「读电量」命令，绝不写设备的 DPI、回报率或灯效，避免和厂商驱动打架。
+
+### Lofree Hyzen：三段式事务
+
+`0xFF1C:0x92` 集合上的 31 字节帧，事务必须按三步走：开始（`04 00 00 01`）→ 命令（`04 00 00 <cmd> 00 00 00 00`）→ 结束（`04 00 00 02`）。在线查询用 `0xAA`，电量查询用 `0x1A`，回复的第 8 字节是电量。任何一步没有回应都会直接放弃，避免把「键盘休眠」当成 0%。
+
+### ASUS ROG 键盘：`12 01` 与 Falchion 的额外偏移
+
+报告长度 65 字节，查询帧是 `12 01`。Windows 有时会在前面补一个 Report ID，所以解析时先看头两字节判断基准偏移：
+
+```python
+base = -1 if (data[0] == 0x12 and data[1] == 0x01) else 0
+```
+
+Falchion 一族多一个 0–10 的档位刻度，真正的百分比在**第 11 字节**，不能直接取第 6 字节。Omni 接收器要先用 `01 A0 00 00` 读配对列表，把键盘的通道号和名字取出来，键盘本身再走 `0xFF00` 的 Report ID `0x02`。
 
 ### 蓝牙耳机：未公开的 PnP 属性
 
@@ -192,4 +261,7 @@ BatteryTray 因此额外读取连接信号来判断设备是否真的可达：
 - [nuxencs/razertray](https://github.com/nuxencs/razertray) —— 报告结构与 CRC 的实现参考，设备表也由此提取
 - [Fan4Metal/mouse_tray](https://github.com/Fan4Metal/mouse_tray) —— 多厂商驱动的架构参考
 - [fastfetch-cli/fastfetch](https://github.com/fastfetch-cli/fastfetch) —— 蓝牙电量属性读取的参考实现
-- [yszyszysz233/2.4G-battery-viewer](https://github.com/yszyszysz233/2.4G-battery-viewer) —— Hands-Free 节点属性的关键说明
+- [yszyszysz233/2.4G-battery-viewer](https://github.com/yszyszysz233/2.4G-battery-viewer) —— Hands-Free 节点属性的关键说明，以及 ATK/VXE、Endgame、VAXEE、Nordic 等 2.4G 电量协议
+- [HeyOkay/HaloBattery](https://github.com/HeyOkay/HaloBattery) —— 二十多种厂商协议的逐字节实现与验证记录
+- [seerge/g-helper](https://github.com/seerge/g-helper) —— ROG 鼠标与键盘 HID 协议
+- [pwr-Solaar/Solaar](https://github.com/pwr-Solaar/Solaar) —— 罗技 HID++ 2.0 协议来源

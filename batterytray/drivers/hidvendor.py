@@ -40,6 +40,9 @@ class VendorProtocol:
     expect: tuple[tuple[int, int], ...] = ()
     retries: int = 2
     connection: str = "2.4G"
+    # The product ids the protocol is limited to. An empty tuple means that
+    # every product id of the vendor is accepted.
+    product_ids: tuple[int, ...] = ()
 
 
 PROTOCOLS: tuple[VendorProtocol, ...] = (
@@ -67,6 +70,9 @@ PROTOCOLS: tuple[VendorProtocol, ...] = (
         payload=(0x04,) + (0x00,) * 15 + (0x49,),
         length=17, level_offset=6, level_max=100, wait_ms=100,
         retries=3,
+        # The AULA keyboards share this collection but answer with the
+        # 20 byte frame instead, so they are left to the newer driver.
+        product_ids=(0xF58A, 0xF58E, 0xF503, 0xFB3E, 0xF524, 0xF5F7),
     ),
     # Endgame Gear XM2w / OP1W.
     VendorProtocol(
@@ -250,6 +256,9 @@ def _candidate_interfaces() -> list[tuple[dict, VendorProtocol]]:
         for protocol in PROTOCOLS:
             if vid != protocol.vendor_id or page != protocol.usage_page:
                 continue
+            if protocol.product_ids:
+                if dev.get("product_id") not in protocol.product_ids:
+                    continue
             path = _path_text(dev.get("path", ""))
             key = (vid, protocol.report_id, path.lower())
             if key in seen:

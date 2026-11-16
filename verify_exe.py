@@ -36,11 +36,25 @@ class BITMAPINFOHEADER(ctypes.Structure):
 
 
 def exe_pids() -> set[int]:
-    script = ("Get-CimInstance Win32_Process -Filter \"Name='BatteryTray.exe'\" | "
+    script = ("Get-CimInstance Win32_Process | "
+              "Where-Object { $_.Name -like 'BatteryTray*.exe' } | "
               "Select-Object -ExpandProperty ProcessId")
     out = subprocess.run(["powershell.exe", "-NoProfile", "-Command", script],
                          capture_output=True, text=True, timeout=30)
-    return {int(p) for p in out.stdout.split() if p.strip().isdigit()}
+    pids = {int(p) for p in out.stdout.split() if p.strip().isdigit()}
+
+    # A process that has no threads left is a leftover from an earlier run
+    # and does not own any window.
+    alive = set()
+    for pid in pids:
+        script = (f"(Get-Process -Id {pid} -ErrorAction SilentlyContinue)"
+                  f".Threads.Count")
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", script],
+            capture_output=True, text=True, timeout=30)
+        if result.stdout.strip().isdigit() and int(result.stdout.strip()) > 0:
+            alive.add(pid)
+    return alive
 
 
 def find_windows(pids):
@@ -79,8 +93,10 @@ def main() -> int:
     tray = [w for w in windows if "SystemTrayIcon" in w["class"]]
     print("tray icon windows:", len(tray))
 
-    for w in tray:
-        user32.SendMessageW(w["hwnd"], WM_NOTIFY, 0, WM_LBUTTONUP)
+    # The popup is a toggle: clicking every icon window would open and close
+    # it again. One click on the first icon is enough.
+    if tray:
+        user32.SendMessageW(tray[0]["hwnd"], WM_NOTIFY, 0, WM_LBUTTONUP)
     time.sleep(2.0)
 
     windows = find_windows(pids)
