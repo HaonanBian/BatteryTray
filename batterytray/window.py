@@ -204,6 +204,13 @@ class BatteryWindow(tk.Tk):
         # The scrollbar is only useful when the content overflows.
         self.scrollbar.grid_remove()
 
+        # The canvas asks for as much room as the cards need, so the packer
+        # pushes the footer out of the window as soon as the window becomes
+        # smaller than the list. Giving the canvas a height of its own
+        # keeps the footer where it belongs: at the bottom of the window.
+        self.canvas.configure(height=s(120))
+        list_wrap.pack_propagate(False)
+
         self.list_frame = tk.Frame(self.canvas, bg=BG)
         self._window_id = self.canvas.create_window((0, 0), window=self.list_frame,
                                                     anchor="nw")
@@ -223,6 +230,7 @@ class BatteryWindow(tk.Tk):
         footer = tk.Frame(self, bg=BG, height=s(42))
         footer.pack(fill="x", side="bottom")
         footer.pack_propagate(False)
+        self.footer = footer
 
         self.summary_label = tk.Label(footer, text="", bg=BG, fg=FG_DIM,
                                       font=(self.family, fp(9)), anchor="w")
@@ -238,9 +246,18 @@ class BatteryWindow(tk.Tk):
                     background=BG).pack(side="right", padx=(0, s(18)),
                                         pady=s(6))
 
+        GlassButton(footer, "检查更新", self.family, dpi,
+                    command=self._open_update_check,
+                    background=BG).pack(side="right", padx=(0, s(10)),
+                                        pady=s(6))
+
     def _open_settings(self) -> None:
         """Shows the settings dialog and applies the result."""
         self.open_settings()
+
+    def _open_update_check(self) -> None:
+        """Shows the window that looks for a newer release."""
+        self.open_update_check()
 
     def _on_list_configure(self, _event=None) -> None:
         """Keeps the canvas wide enough for the list frame."""
@@ -512,6 +529,40 @@ class BatteryWindow(tk.Tk):
             return
 
         self.app.apply_config(new_config)
+
+    def open_update_check(self) -> None:
+        """Shows the window that looks for a newer release.
+
+        The check itself runs in a thread, so the window is not blocked
+        while GitHub is asked.
+        """
+        from .updatedialog import UpdateDialog
+
+        app = self.app
+        if app is None or not hasattr(app, "check_update_async"):
+            dialog = UpdateDialog(self, self.family, self.dpi)
+            dialog.show_failed("无法检查更新")
+            return
+
+        def install(release, on_progress, on_done, on_error):
+            """Downloads the release and puts it in place."""
+            app.download_update_async(release, on_progress=on_progress,
+                                      on_done=on_done, on_error=on_error)
+
+        dialog = UpdateDialog(self, self.family, self.dpi, on_install=install)
+
+        def found(release):
+            """Shows what the check found."""
+            if release is None:
+                dialog.show_up_to_date()
+            else:
+                dialog.show_new_version(release)
+
+        def failed(reason: str):
+            """Says that the check did not work out."""
+            dialog.show_failed(reason)
+
+        app.check_update_async(on_result=found, on_error=failed)
 
     def _update_scrollbar(self) -> None:
         """Shows the scrollbar only when the content does not fit."""

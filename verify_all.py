@@ -12,7 +12,7 @@ import time
 import pytest
 from PIL import Image
 
-from batterytray import autostart, singleton
+from batterytray import autostart, singleton, update
 from batterytray.app import Device, build_tooltip, collect_devices
 from batterytray.config import Config
 from batterytray.drivers import (asusmouse, bluetooth, devices, hidvendor,
@@ -3498,3 +3498,259 @@ def test_two_drivers_never_claim_the_same_device():
 
     for key, names in claims.items():
         assert len(names) == 1, (key, names)
+
+
+# --------------------------------------------------------------------------
+# Checking for an update
+# --------------------------------------------------------------------------
+
+
+def test_a_version_is_read_as_a_list_of_numbers():
+    """The tag of a release may carry a v in front of it."""
+    assert update.parse_version("1.2.0") == (1, 2, 0)
+    assert update.parse_version("v1.2.0") == (1, 2, 0)
+    assert update.parse_version("V1.2.0") == (1, 2, 0)
+    assert update.parse_version(" 1.2.0 ") == (1, 2, 0)
+
+
+def test_a_version_with_a_suffix_still_reads():
+    """A pre-release suffix may not stop the comparison."""
+    assert update.parse_version("1.2.0-beta") == (1, 2, 0)
+    assert update.parse_version("v1.2.0-rc1") == (1, 2, 0)
+
+
+def test_an_empty_version_reads_as_nothing():
+    """A broken tag must not crash the comparison."""
+    assert update.parse_version("") == ()
+    assert update.parse_version("abc") == ()
+
+
+def test_a_newer_version_is_recognised():
+    """The comparison has to order the parts as numbers, not as text."""
+    assert update.is_newer("1.3.0", "1.2.0")
+    assert update.is_newer("v1.3.0", "1.2.0")
+    assert update.is_newer("1.10.0", "1.9.0")
+    assert update.is_newer("2.0.0", "1.99.99")
+
+
+def test_the_same_or_an_older_version_is_not_newer():
+    """The app must not offer an update it already has."""
+    assert not update.is_newer("1.2.0", "1.2.0")
+    assert not update.is_newer("v1.2.0", "1.2.0")
+    assert not update.is_newer("1.2.0", "1.3.0")
+    assert not update.is_newer("1.2.0", "2.0.0")
+
+
+def test_the_release_is_read_out_of_the_answer_of_github():
+    """The fields the window needs have to be taken from the answer."""
+    payload = {
+        "tag_name": "v1.3.0",
+        "html_url": "https://github.com/HaonanBian/BatteryTray/releases/tag/v1.3.0",
+        "body": "修复了窗口缩小时按钮消失的问题",
+        "assets": [
+            {
+                "name": "BatteryTray-Setup-1.3.0.exe",
+                "browser_download_url": "https://example.invalid/setup.exe",
+            },
+            {
+                "name": "BatteryTray-1.3.0-portable.zip",
+                "browser_download_url": "https://example.invalid/portable.zip",
+            },
+            {
+                "name": "BatteryTray-1.3.0.exe",
+                "browser_download_url": "https://example.invalid/program.exe",
+            },
+        ],
+    }
+    release = update.parse_release(payload)
+    assert release.version == "v1.3.0"
+    assert release.asset_name == "BatteryTray-1.3.0.exe"
+    assert release.asset_url == "https://example.invalid/program.exe"
+    assert release.setup_name == "BatteryTray-Setup-1.3.0.exe"
+    assert release.setup_url == "https://example.invalid/setup.exe"
+    assert "按钮消失" in release.notes
+
+
+def test_the_update_picks_the_plain_program_and_not_the_installer():
+    """Only the plain executable can replace the running copy.
+
+    The portable archive holds the program in a folder and the installer
+    goes through a wizard, so neither of them fits.
+    """
+    payload = {
+        "tag_name": "v1.3.0",
+        "assets": [
+            {"name": "BatteryTray-Setup-1.3.0.exe",
+             "browser_download_url": "https://example.invalid/setup.exe"},
+            {"name": "BatteryTray-1.3.0-portable.zip",
+             "browser_download_url": "https://example.invalid/portable.zip"},
+            {"name": "BatteryTray-1.3.0.exe",
+             "browser_download_url": "https://example.invalid/program.exe"},
+        ],
+    }
+    release = update.parse_release(payload)
+    assert release.program_name == "BatteryTray-1.3.0.exe"
+    assert release.program_url == "https://example.invalid/program.exe"
+    assert release.update_url == "https://example.invalid/program.exe"
+
+
+def test_a_release_without_a_version_is_refused():
+    """An answer without a tag cannot be used."""
+    with pytest.raises(update.UpdateError):
+        update.parse_release({"html_url": "https://example.invalid"})
+
+
+def test_a_release_without_assets_is_still_readable():
+    """A release may have no files at all."""
+    release = update.parse_release({"tag_name": "v1.3.0"})
+    assert release.version == "v1.3.0"
+    assert release.asset_url == ""
+    assert release.setup_url == ""
+
+
+def test_the_check_reports_a_new_release():
+    """A newer release has to be reported."""
+
+    class FakeRelease:
+        version = "v1.3.0"
+
+    def fake_fetch(timeout=update.TIMEOUT):
+        return FakeRelease()
+
+    original = update.fetch_latest
+    update.fetch_latest = fake_fetch
+    try:
+        found = update.check_for_update(current="1.2.0")
+    finally:
+        update.fetch_latest = original
+    assert found is not None
+    assert found.version == "v1.3.0"
+
+
+def test_the_check_reports_that_everything_is_up_to_date():
+    """The same version must not be offered as an update."""
+
+    class FakeRelease:
+        version = "v1.2.0"
+
+    def fake_fetch(timeout=update.TIMEOUT):
+        return FakeRelease()
+
+    original = update.fetch_latest
+    update.fetch_latest = fake_fetch
+    try:
+        assert update.check_for_update(current="1.2.0") is None
+    finally:
+        update.fetch_latest = original
+
+
+def test_a_download_that_fails_leaves_no_file_behind(tmp_path):
+    """A broken download must not leave a half written file."""
+    target = tmp_path / "BatteryTray.exe"
+    with pytest.raises(update.UpdateError):
+        update.download_file("https://127.0.0.1:1/nothing.exe", target,
+                             timeout=5)
+    assert not target.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_download_that_fails_twice_leaves_nothing_behind(tmp_path):
+    """The temporary file has to be cleaned up as well."""
+    target = tmp_path / "BatteryTray.exe"
+    for _ in range(2):
+        with pytest.raises(update.UpdateError):
+            update.download_file("", target)
+    assert not target.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_the_running_copy_is_only_replaced_when_it_is_built():
+    """There is nothing to replace when the app runs from the source."""
+    import sys
+    # The tests run from the source, so there is no executable to replace.
+    assert not getattr(sys, "frozen", False)
+    assert update.running_executable() is None
+
+
+def test_an_update_without_an_executable_is_refused(tmp_path):
+    """The update needs a file to put the new one in place of."""
+    source = tmp_path / "BatteryTray.exe.new"
+    source.write_bytes(b"new")
+    with pytest.raises(update.UpdateError):
+        update.apply_update(source, target=None)
+
+
+def test_the_update_script_waits_for_the_app_and_starts_it_again():
+    """The script has to wait for the app before it touches the files."""
+    from pathlib import Path
+
+    target = Path("C:/app/BatteryTray.exe")
+    source = Path("C:/app/BatteryTray.exe.new")
+    backup = Path("C:/app/BatteryTray.exe.old")
+    script = update._replace_script(target, source, backup, 4321)
+    try:
+        text = script.read_text(encoding="mbcs", errors="replace")
+    finally:
+        script.unlink(missing_ok=True)
+    # It waits for the process of the app to be gone.
+    assert "tasklist" in text
+    assert "4321" in text
+    # The files are swapped.
+    assert str(target) in text
+    assert str(source) in text
+    assert str(backup) in text
+    # The new copy is started again afterwards.
+    assert "start" in text
+
+
+def test_the_new_copy_is_started_by_a_launcher_of_its_own():
+    """A program that is started from the command interpreter is killed.
+
+    The program would never get a chance to run when it is started
+    straight from the interpreter, so the launcher has to be a file of
+    its own.
+    """
+    from pathlib import Path
+
+    target = Path("C:/app/BatteryTray.exe")
+    source = Path("C:/app/BatteryTray.exe.new")
+    backup = Path("C:/app/BatteryTray.exe.old")
+    script = update._replace_script(target, source, backup, 4321)
+    try:
+        text = script.read_text(encoding="mbcs", errors="replace")
+        launcher = Path(str(script).replace("replace.bat", "launch.bat"))
+        launcher_text = launcher.read_text(encoding="mbcs", errors="replace")
+    finally:
+        script.unlink(missing_ok=True)
+        launcher.unlink(missing_ok=True)
+    # The script starts the launcher and not the program itself.
+    assert "launch.bat" in text
+    assert f'start "" "{target}"' not in text
+    # The launcher starts the program.
+    assert f'start "" "{target}"' in launcher_text
+
+
+def test_the_start_does_not_stand_inside_a_block():
+    """The start does not work inside a block of a batch file.
+
+    The script would start the new copy and then fall through into the
+    rest of the block, which would throw the copy away again.
+    """
+    from pathlib import Path
+
+    target = Path("C:/app/BatteryTray.exe")
+    source = Path("C:/app/BatteryTray.exe.new")
+    backup = Path("C:/app/BatteryTray.exe.old")
+    script = update._replace_script(target, source, backup, 4321)
+    try:
+        text = script.read_text(encoding="mbcs", errors="replace")
+    finally:
+        script.unlink(missing_ok=True)
+    # The start stands on its own, with a jump around it.
+    assert "goto done" in text
+    start_line = [line for line in text.splitlines()
+                  if "launch.bat" in line and "start" in line]
+    assert start_line, "the launcher has to be started"
+    # The line of the start is not inside a block.
+    assert not start_line[0].strip().startswith("(")
+

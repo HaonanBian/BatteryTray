@@ -19,6 +19,8 @@ from .config import Config, config_dir
 from .drivers import (asusmouse, bluetooth, hidvendor, logitech, razer,
                       vendor2)
 from .icon import DeviceState, build_device_icon, build_icon
+from . import update
+from .update import UpdateError, check_for_update
 
 
 # Device kinds, in the order the user cares about them.
@@ -268,7 +270,8 @@ def build_menu(config: Config, icon: pystray.Icon,
                show_window: Callable[[], None],
                toggle_panel: Callable[[], None],
                open_settings: Callable[[], None],
-               quit_app: Callable[[], None]) -> pystray.Menu:
+               quit_app: Callable[[], None],
+               check_update: Callable[[], None] | None = None) -> pystray.Menu:
     """Builds the right-click menu."""
     autostart_item = pystray.MenuItem(
         "Start with Windows",
@@ -284,6 +287,8 @@ def build_menu(config: Config, icon: pystray.Icon,
         pystray.MenuItem("立即刷新", lambda icon, item: refresh()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("设置", lambda icon, item: open_settings()),
+        pystray.MenuItem("检查更新",
+                         lambda icon, item: check_update() if check_update else None),
         autostart_item,
         pystray.MenuItem("打开启动文件夹",
                          lambda icon, item: _open_startup_folder(icon, item, config)),
@@ -509,6 +514,7 @@ class TrayApp:
                     show_window=self._show_window,
                     toggle_panel=self._toggle_panel,
                     open_settings=self._open_settings,
+                    check_update=self._check_update,
                     quit_app=self._quit,
                 )
                 icon.run_detached()
@@ -604,6 +610,107 @@ class TrayApp:
         requested while a poll is running simply runs one more poll after it.
         """
         self._wake.set()
+
+    # ------------------------------------------------------------------
+    # Checking for an update
+    # ------------------------------------------------------------------
+
+    def check_update_async(self, on_result=None, on_error=None) -> None:
+        """Looks for a newer release without blocking the interface.
+
+        The check runs in a thread, because it has to wait for GitHub.
+        The answer is handed to the callbacks on the tkinter thread.
+        """
+        def worker():
+            try:
+                release = check_for_update()
+            except UpdateError as exc:
+                if on_error is not None:
+                    self._post_to_window(on_error, str(exc))
+                return
+            except Exception as exc:  # noqa: BLE001 - never crash the app
+                if on_error is not None:
+                    self._post_to_window(on_error, f"检查更新失败：{exc}")
+                return
+            if on_result is not None:
+                self._post_to_window(on_result, release)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _post_to_window(self, func, *args) -> None:
+        """Runs a call on the tkinter thread."""
+        window = self._window
+        if window is None:
+            return
+        try:
+            window.post(func, *args)
+        except Exception:
+            pass
+
+    def download_update_async(self, release, on_progress=None, on_done=None,
+                               on_error=None) -> None:
+        """Downloads a release and puts it in place of the running copy.
+
+        The download runs in a thread, because it has to wait for the
+        server. The app is closed once the new file is in place.
+        """
+        def worker():
+            target = update.running_executable()
+            if target is None:
+                self._post_to_window(on_error,
+                                     "这个版本不是单独的可执行文件，"
+                                     "请到下载页面手动替换")
+                return
+            folder = target.parent
+            staged = folder / f"{target.name}.new"
+            try:
+                update.download_file(release.update_url, staged,
+                                     progress=on_progress)
+                update.apply_update(staged, target)
+            except update.UpdateError as exc:
+                staged.unlink(missing_ok=True)
+                self._post_to_window(on_error, str(exc))
+                return
+            except Exception as exc:  # noqa: BLE001 - never crash the app
+                staged.unlink(missing_ok=True)
+                self._post_to_window(on_error, f"更新失败：{exc}")
+                return
+            self._post_to_window(on_done)
+            # The app has to close before the new file can take its place,
+            # so the copy is given a moment to finish its work.
+            self._quit_after_update()
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _quit_after_update(self, delay: float = 1.5) -> None:
+        """Closes the app so the helper can put the new file in place.
+
+        The window is closed first, so the tray icon and the popup are
+        gone before the process ends. The helper waits for the process to
+        disappear and then starts the new copy.
+        """
+        def stop():
+            self._quit()
+
+        window = self._window
+        if window is not None:
+            try:
+                window.post(self._schedule_stop, delay)
+                return
+            except Exception:
+                pass
+        threading.Timer(delay, stop).start()
+
+    def _schedule_stop(self, delay: float) -> None:
+        """Closes the app after a short delay."""
+        window = self._window
+        if window is not None:
+            try:
+                window.after(int(delay * 1000), self._quit)
+                return
+            except Exception:
+                pass
+        threading.Timer(delay, self._quit).start()
 
     def run(self) -> None:
         """Starts the window, the tray icon and the polling thread."""
@@ -707,6 +814,16 @@ class TrayApp:
             return
         try:
             window.post(window.open_settings)
+        except Exception:
+            pass
+
+    def _check_update(self) -> None:
+        """Looks for a newer release of the app."""
+        window = self._window
+        if window is None:
+            return
+        try:
+            window.post(window.open_update_check)
         except Exception:
             pass
 
