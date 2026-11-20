@@ -253,6 +253,9 @@ class GlassButton(tk.Canvas):
         self._accent = accent
         self._hover = False
         self._pressed = False
+        # A disabled button does not react to the pointer and is drawn in
+        # a quieter colour.
+        self._enabled = True
 
         self._font = (family, -scale_pixels(11, dpi),
                       "bold" if accent else "normal")
@@ -269,10 +272,37 @@ class GlassButton(tk.Canvas):
         self.bind("<Leave>", self._on_leave)
         self._draw()
 
+    # -- changing the button --------------------------------------------
+
+    def set_text(self, text: str) -> None:
+        """Changes the text on the button."""
+        if text == self._text:
+            return
+        self._text = text
+        measure = tkfont.Font(root=self, font=self._font)
+        pad_x = scale_pixels(15, self.dpi)
+        self._width = measure.measure(text) + pad_x * 2
+        self.configure(width=self._width)
+        self._draw()
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enables or disables the button."""
+        enabled = bool(enabled)
+        if enabled == self._enabled:
+            return
+        self._enabled = enabled
+        if not enabled:
+            self._hover = False
+            self._pressed = False
+        self.configure(cursor="hand2" if enabled else "arrow")
+        self._draw()
+
     # -- colours -------------------------------------------------------
 
     def _fill(self) -> str:
         """The colour of the button."""
+        if not self._enabled:
+            return "#232A31"
         if self._accent:
             if self._pressed:
                 return "#93BFA3"
@@ -283,6 +313,8 @@ class GlassButton(tk.Canvas):
 
     def _text_color(self) -> str:
         """The colour of the text on the button."""
+        if not self._enabled:
+            return FG_MUTED
         if self._accent:
             return "#142019"
         return FG if self._hover else FG_DIM
@@ -300,6 +332,8 @@ class GlassButton(tk.Canvas):
 
     def _on_press(self, _event=None) -> None:
         """The button is pushed in."""
+        if not self._enabled:
+            return
         self._pressed = True
         self._draw()
 
@@ -310,6 +344,8 @@ class GlassButton(tk.Canvas):
         self._draw()
         if not was_pressed:
             return
+        if not self._enabled:
+            return
         # The click only counts when the pointer is still on the button.
         if not (0 <= event.x <= self._width and 0 <= event.y <= self._height):
             return
@@ -318,6 +354,8 @@ class GlassButton(tk.Canvas):
 
     def _on_enter(self, _event=None) -> None:
         """The pointer is over the button."""
+        if not self._enabled:
+            return
         self._hover = True
         self._draw()
 

@@ -191,7 +191,7 @@ $lowAfter = @(Get-LowExecutables $Path)
 Write-Host "Result: root=$rootLabel, low-labelled exes=$($lowAfter.Count)" -ForegroundColor Cyan
 foreach ($e in $lowAfter) { Write-Host "    still Low: $e" -ForegroundColor Yellow }
 if ($lowAfter.Count -eq 0) {
-    Write-Host "Done. Launch release\BatteryTray-1.3.0.exe again to verify." -ForegroundColor Green
+    Write-Host "Done. Launch release\BatteryTray-1.3.1.exe again to verify." -ForegroundColor Green
     exit 0
 }
 Write-Host "Some exes are still Low; run this script as Administrator to finish." -ForegroundColor Yellow
