@@ -89,6 +89,25 @@ def main() -> None:
     shot(dialog, "update_installing.png")
     dialog.destroy()
 
+    # ---- The state when the download is tried again ----
+    dialog = UpdateDialog(root, family, 144.0,
+                           on_install=lambda *a: None)
+    dialog.show_new_version(Release(
+        version="v1.3.0",
+        url="https://example.invalid",
+        notes="修复了若干问题",
+        asset_url="https://example.invalid/portable.zip",
+        setup_url="https://example.invalid/setup.exe",
+    ))
+    settle(root)
+    dialog._install()
+    dialog._on_retry(1, "文件不完整")
+    settle(root)
+    print("retry title:", dialog.title_label.cget("text"))
+    print("retry message:", dialog.message_label.cget("text"))
+    shot(dialog, "update_retry.png")
+    dialog.destroy()
+
     # ---- The state when the check failed ----
     dialog = UpdateDialog(root, family, 144.0)
     dialog.show_failed("连不上 GitHub：网络超时")

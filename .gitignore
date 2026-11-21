@@ -25,3 +25,14 @@ asuskb.txt
 hid_h.txt
 mch5.txt
 pprovider.txt
+
+# The token for publishing a release must never be committed
+tools/.gh_token
+
+# The scratch folders the update probes leave behind
+out_test/_e2e/
+out_test/_frozen/
+out_test/_swap/
+out_test/_swap2/
+out_test/_updflow/
+out_test/_findstr_test.bat

@@ -544,10 +544,11 @@ class BatteryWindow(tk.Tk):
             dialog.show_failed("无法检查更新")
             return
 
-        def install(release, on_progress, on_done, on_error):
+        def install(release, on_progress, on_done, on_error, on_retry):
             """Downloads the release and puts it in place."""
             app.download_update_async(release, on_progress=on_progress,
-                                      on_done=on_done, on_error=on_error)
+                                      on_done=on_done, on_error=on_error,
+                                      on_retry=on_retry)
 
         dialog = UpdateDialog(self, self.family, self.dpi, on_install=install)
 

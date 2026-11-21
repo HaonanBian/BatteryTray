@@ -49,7 +49,7 @@ class FakeApp:
         on_result(release)
 
     def download_update_async(self, release, on_progress=None, on_done=None,
-                              on_error=None):
+                              on_error=None, on_retry=None):
         """Pretends the download worked."""
         FakeApp.calls.append("download_update_async")
         on_progress(50, 100)

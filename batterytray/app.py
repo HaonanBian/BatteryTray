@@ -648,7 +648,7 @@ class TrayApp:
             pass
 
     def download_update_async(self, release, on_progress=None, on_done=None,
-                               on_error=None) -> None:
+                               on_error=None, on_retry=None) -> None:
         """Downloads a release and puts it in place of the running copy.
 
         The download runs in a thread, because it has to wait for the
@@ -665,7 +665,8 @@ class TrayApp:
             staged = folder / f"{target.name}.new"
             try:
                 update.download_file(release.update_url, staged,
-                                     progress=on_progress)
+                                     progress=on_progress,
+                                     on_retry=on_retry)
                 update.apply_update(staged, target)
             except update.UpdateError as exc:
                 staged.unlink(missing_ok=True)

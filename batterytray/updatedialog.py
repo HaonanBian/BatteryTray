@@ -436,7 +436,7 @@ class UpdateDialog(tk.Toplevel):
         self._relayout()
 
         self.on_install(self.release, self._on_progress, self._on_installed,
-                        self._on_install_failed)
+                        self._on_install_failed, self._on_retry)
 
     def _on_progress(self, read: int, total: int) -> None:
         """Shows how far the download got."""
@@ -447,6 +447,19 @@ class UpdateDialog(tk.Toplevel):
             # a little with every chunk.
             self._progress_value = min(0.99, self._progress_value + 0.02)
             self._set_progress(self._progress_value)
+
+    def _on_retry(self, attempt: int, reason: str) -> None:
+        """Says that the download is tried again.
+
+        The connection to GitHub drops from time to time. Without this
+        the app would look stuck while it waits for the next attempt.
+        """
+        self.title_label.configure(text="网络不稳定，正在重试…")
+        self.message_label.configure(
+            text=f"第 {attempt} 次下载失败（{reason}），正在重试…")
+        # The bar goes back to the start, because the new attempt
+        # starts over.
+        self._set_progress(0.0)
 
     def _set_progress(self, value: float) -> None:
         """Draws the bar."""

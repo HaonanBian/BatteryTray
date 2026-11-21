@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -47,6 +48,10 @@ USER_AGENT = "BatteryTray"
 
 class UpdateError(Exception):
     """Something went wrong while looking for an update."""
+
+
+class _RetryableError(Exception):
+    """A download attempt failed in a way that another one might fix."""
 
 
 @dataclass(frozen=True)
@@ -245,23 +250,78 @@ def running_executable() -> Path | None:
         return None
 
 
+def _looks_like_program(path: Path) -> bool:
+    """Says whether the file starts like a Windows program.
+
+    A download can go wrong in a way that leaves a file of the right
+    size behind, for example when the server answers with an error
+    page. Such a file cannot be run, so it is caught here.
+    """
+    try:
+        with path.open("rb") as handle:
+            return handle.read(2) == b"MZ"
+    except OSError:
+        return False
+
+
 def download_file(url: str, target: Path, progress=None,
-                  timeout: int = 60) -> Path:
+                  timeout: int = 60, attempts: int = 3,
+                  on_retry=None) -> Path:
     """Downloads a file to the given path.
 
     The file is written next to the target first and moved into place
     afterwards, so a broken download never leaves a half written file
     behind.
+
+    The connection to GitHub drops from time to time, so a download
+    that breaks off is tried again. A file that is not a program is
+    refused, because it cannot be run and there is no point in putting
+    it in place of the running one.
+
+    ``on_retry`` is called with the number of the attempt and the
+    reason, so that the user can be told that the download is still
+    going on.
     """
     if not url:
         raise UpdateError("没有下载地址")
 
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
+
+    last_error = ""
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            return _download_once(url, target, progress, timeout)
+        except _RetryableError as exc:
+            last_error = str(exc)
+            if attempt >= max(1, attempts):
+                break
+            if on_retry is not None:
+                try:
+                    on_retry(attempt, last_error)
+                except Exception:
+                    pass
+            # The connection needs a moment before it works again.
+            time.sleep(min(2 ** attempt, 8))
+
+    raise UpdateError(f"下载失败：{last_error}")
+
+
+def _download_once(url: str, target: Path, progress, timeout: int) -> Path:
+    """Downloads the file once.
+
+    Raises :class:`_RetryableError` when the attempt failed in a way
+    that another attempt might fix.
+    """
     # The temporary file sits in the same folder, so the move does not
     # cross a file system boundary.
-    handle, temporary = tempfile.mkstemp(prefix="batterytray-download-",
-                                         dir=str(target.parent))
+    try:
+        handle, temporary = tempfile.mkstemp(prefix="batterytray-download-",
+                                             dir=str(target.parent))
+    except OSError as exc:
+        raise UpdateError(
+            f"无法在程序目录写入文件：{exc}。"
+            "请以管理员身份运行后再试") from exc
     os.close(handle)
     temporary_path = Path(temporary)
 
@@ -285,17 +345,26 @@ def download_file(url: str, target: Path, progress=None,
                         progress(read, total)
     except urllib.error.HTTPError as exc:
         temporary_path.unlink(missing_ok=True)
+        if exc.code in (403, 429, 500, 502, 503, 504):
+            raise _RetryableError(f"服务器返回 {exc.code}") from exc
         raise UpdateError(f"下载失败：服务器返回 {exc.code}") from exc
     except urllib.error.URLError as exc:
         temporary_path.unlink(missing_ok=True)
-        raise UpdateError(f"下载失败：{exc.reason}") from exc
+        raise _RetryableError(str(exc.reason)) from exc
     except OSError as exc:
         temporary_path.unlink(missing_ok=True)
-        raise UpdateError(f"下载失败：{exc}") from exc
+        raise _RetryableError(str(exc)) from exc
 
     if total and read < total:
         temporary_path.unlink(missing_ok=True)
-        raise UpdateError("下载失败：文件不完整")
+        raise _RetryableError("文件不完整")
+
+    # A file that is not a program would break the app. This happens
+    # when the server answers with something else than the file.
+    if target.suffix.lower() == ".exe" and not _looks_like_program(
+            temporary_path):
+        temporary_path.unlink(missing_ok=True)
+        raise UpdateError("下载失败：拿到的不是有效的程序文件")
 
     try:
         shutil.move(str(temporary_path), str(target))
@@ -364,6 +433,36 @@ def _replace_script(target: Path, source: Path, backup: Path,
     return script
 
 
+def _folder_can_be_written(folder: Path) -> bool:
+    """Says whether a new file may be put into the given folder.
+
+    The check is done by really writing a small file, because the
+    rights of the folder can be more strict than what the system
+    reports.
+    """
+    handle = None
+    probe = None
+    try:
+        handle, name = tempfile.mkstemp(prefix="batterytray-write-",
+                                        dir=str(folder))
+        os.close(handle)
+        handle = None
+        probe = Path(name)
+        probe.unlink()
+        probe = None
+        return True
+    except OSError:
+        return False
+    finally:
+        if handle is not None:
+            os.close(handle)
+        if probe is not None:
+            try:
+                probe.unlink()
+            except OSError:
+                pass
+
+
 def apply_update(source: Path, target: Path | None = None) -> bool:
     """Puts the downloaded file in place of the running copy.
 
@@ -380,6 +479,15 @@ def apply_update(source: Path, target: Path | None = None) -> bool:
     target = Path(target)
     if not source.is_file():
         raise UpdateError("下载的文件不见了")
+
+    # The new file has to be written next to the running one. When the
+    # program sits in a folder that only the administrator may write
+    # to, the swap cannot work. That is worth saying, because the
+    # program would otherwise close and nothing would happen.
+    if not _folder_can_be_written(target.parent):
+        raise UpdateError(
+            "没有权限修改程序所在文件夹，请以管理员身份运行后再试，"
+            "或到下载页面手动替换")
 
     backup = target.with_suffix(target.suffix + ".old")
     script = _replace_script(target, source, backup, os.getpid())
