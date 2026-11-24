@@ -119,10 +119,26 @@ COD_MINOR_JOYSTICK = 0x06
 COD_MINOR_GAMEPAD = 0x09
 COD_MINOR_GAME_CONTROLLER = 0x01
 
-# How long a device may stay silent before it is considered gone. The
-# Bluetooth stack refreshes the "last seen" stamp whenever it hears from the
-# peripheral, so a device that has not been heard from for a while is off.
-DEVICE_SEEN_TIMEOUT_SECONDS = 300
+# How long a device may stay silent before it is considered gone.
+#
+# The stamps the Bluetooth stack keeps are refreshed with very different
+# intervals, so one threshold cannot serve all of them:
+#
+# - The activity stamp of the device node is written whenever the
+#   Bluetooth stack does something with the node. It therefore follows
+#   the device closely while it is in use.
+# - The battery report is written when the peripheral reports its level.
+#   That happens every few minutes for a headset but only every few
+#   hours for a gamepad that sits still.
+# - The stamps of the registry are written when the link is set up, so
+#   they can be much older than the device being in use.
+#
+# A device is therefore not thrown away after a couple of minutes. The
+# timeout for the battery report is generous, because a gamepad that is
+# switched on but idle reports its level rarely.
+DEVICE_ACTIVITY_TIMEOUT_SECONDS = 600
+DEVICE_SEEN_TIMEOUT_SECONDS = 900
+DEVICE_BATTERY_TIMEOUT_SECONDS = 6 * 3600
 
 # Windows time stamps count 100-nanosecond ticks since 1601-01-01 UTC.
 _FILETIME_EPOCH = datetime.datetime(1601, 1, 1)
@@ -150,6 +166,129 @@ setupapi.SetupDiGetDeviceRegistryPropertyW.argtypes = [
     wt.HANDLE, ctypes.POINTER(SP_DEVINFO_DATA), wt.DWORD, ctypes.POINTER(wt.DWORD),
     ctypes.c_void_p, wt.DWORD, ctypes.POINTER(wt.DWORD)]
 setupapi.SetupDiDestroyDeviceInfoList.argtypes = [wt.HANDLE]
+
+
+# --------------------------------------------------------------------------
+# The radio of the Bluetooth stack
+# --------------------------------------------------------------------------
+#
+# The device nodes of Windows do not say whether a peripheral is connected:
+# the flag of the device enumeration stays ``False`` on a gamepad even
+# while it is in use. The radio itself does know, and it answers with the
+# address of every device it sees together with a flag that says whether
+# the link is up.
+#
+# The radio keeps the address in a single number of four bytes, while a
+# Bluetooth address has six. Which of the six bytes end up in that number
+# is not written down anywhere, so every sensible reading is offered and
+# the one that the radio uses is found by looking at what it answers.
+
+class _RADIO_PARAMS(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", wt.DWORD),
+        ("fReturnAuthorization", ctypes.c_ubyte),
+        ("fReturnAuthenticated", ctypes.c_ubyte),
+        ("fReturnRemembered", ctypes.c_ubyte),
+        ("fReturnConnected", ctypes.c_ubyte),
+        ("fReturnUnknown", ctypes.c_ubyte),
+        ("hRadio", wt.DWORD),
+    ]
+
+
+class _RADIO_DEVICE_INFO(ctypes.Structure):
+    # The name of the device is 116 characters long, not the 248 that the
+    # documentation of the older structure suggests. Windows checks the
+    # size of the structure and refuses the call when it does not match,
+    # so the field is padded to make the structure exactly 288 bytes.
+    _fields_ = [
+        ("dwSize", wt.DWORD),
+        ("Address", wt.DWORD),
+        ("ulClassofDevice", wt.DWORD),
+        ("fConnected", wt.BOOL),
+        ("fRemembered", wt.BOOL),
+        ("fAuthenticated", wt.BOOL),
+        ("stLastSeen", wt.FILETIME),
+        ("stLastUsed", wt.FILETIME),
+        ("szName", ctypes.c_wchar * 124),
+    ]
+
+
+def _radio_address_candidates(plain_address: str) -> tuple[int, ...]:
+    """The numbers the radio could be holding for an address.
+
+    The radio keeps the address of a device in a single number of four
+    bytes, but a Bluetooth address has six. Which of the six bytes end
+    up in the number is not written down anywhere, so every sensible
+    reading is offered and the one that the radio actually uses is
+    found by looking at what it answers.
+    """
+    if len(plain_address) != 12:
+        return ()
+    high = int(plain_address[0:8], 16)
+    low = int(plain_address[4:12], 16)
+    return (
+        # The first four bytes, in the order they are written.
+        high,
+        # The last four bytes, in the order they are written.
+        low,
+        # The first four bytes, counted from the back.
+        int(plain_address[6:8] + plain_address[4:6]
+            + plain_address[2:4] + plain_address[0:2], 16),
+        # The last four bytes, counted from the back.
+        int(plain_address[10:12] + plain_address[8:10]
+            + plain_address[6:8] + plain_address[4:6], 16),
+    )
+
+
+def _radio_connected_addresses() -> dict[int, tuple[bool, str]]:
+    """Asks the Bluetooth radio which devices it sees.
+
+    Returns a mapping of the number the radio holds for a device to
+    whether the link is up, together with the name of the device. The
+    radio only answers for the devices it knows about, so a device that
+    is switched off is not in the answer at all.
+    """
+    try:
+        dll = ctypes.WinDLL("bthprops.cpl")
+    except OSError:
+        return {}
+
+    dll.BluetoothFindFirstDevice.argtypes = [
+        ctypes.POINTER(_RADIO_PARAMS), ctypes.POINTER(_RADIO_DEVICE_INFO)]
+    dll.BluetoothFindFirstDevice.restype = wt.BOOL
+    dll.BluetoothFindNextDevice.argtypes = [
+        ctypes.POINTER(_RADIO_PARAMS), ctypes.POINTER(_RADIO_DEVICE_INFO)]
+    dll.BluetoothFindNextDevice.restype = wt.BOOL
+
+    params = _RADIO_PARAMS()
+    params.dwSize = ctypes.sizeof(_RADIO_PARAMS)
+    # Every kind of device is asked for, so that a device that is
+    # remembered but not connected can be told apart from one that is
+    # gone altogether.
+    params.fReturnAuthorization = 1
+    params.fReturnAuthenticated = 1
+    params.fReturnRemembered = 1
+    params.fReturnConnected = 1
+    params.fReturnUnknown = 1
+
+    info = _RADIO_DEVICE_INFO()
+    info.dwSize = ctypes.sizeof(_RADIO_DEVICE_INFO)
+
+    result: dict[int, tuple[bool, str]] = {}
+    try:
+        if not dll.BluetoothFindFirstDevice(ctypes.byref(params),
+                                            ctypes.byref(info)):
+            return {}
+        while True:
+            result[info.Address & 0xFFFFFFFF] = (bool(info.fConnected),
+                                                  info.szName)
+            info.dwSize = ctypes.sizeof(_RADIO_DEVICE_INFO)
+            if not dll.BluetoothFindNextDevice(ctypes.byref(params),
+                                               ctypes.byref(info)):
+                break
+    except OSError:
+        return {}
+    return result
 
 
 @dataclass(frozen=True)
@@ -220,12 +359,28 @@ def _read_boolean_property(dev_info: wt.HANDLE, info: SP_DEVINFO_DATA,
     return bool(value.value)
 
 
+def _local_stamp_to_utc(moment: datetime.datetime) -> datetime.datetime:
+    """Turns a stamp that was written in local time into UTC.
+
+    The Bluetooth stack writes the activity stamp of a device node with
+    the local time of the machine, while the other stamps it keeps are in
+    UTC. A naive time is read as UTC when it is turned into an aware one,
+    so the local time has to be stated first.
+    """
+    local_zone = datetime.datetime.now().astimezone().tzinfo
+    return moment.replace(tzinfo=local_zone).astimezone(
+        datetime.UTC).replace(tzinfo=None)
+
+
 def _read_filetime_property(dev_info: wt.HANDLE, info: SP_DEVINFO_DATA,
-                            fmtid: GUID, pid: int) -> datetime.datetime | None:
+                            fmtid: GUID, pid: int,
+                            local_time: bool = False) -> datetime.datetime | None:
     """Reads a file time property, or ``None`` when it is absent.
 
-    The value is returned in UTC, which is how the Windows time stamps are
-    defined.
+    Most of these stamps are in UTC, which is how the Windows time
+    stamps are defined. The "last connected" stamp of the Bluetooth
+    stack is the exception: it is written in local time, so it has to
+    be converted before it can be compared with anything else.
     """
     key = PROPERTYKEY(fmtid, pid)
     prop_type = wt.DWORD(0)
@@ -240,10 +395,14 @@ def _read_filetime_property(dev_info: wt.HANDLE, info: SP_DEVINFO_DATA,
     if stamp == 0:
         return None
     try:
-        return _FILETIME_EPOCH + datetime.timedelta(microseconds=stamp // 10)
+        moment = _FILETIME_EPOCH + datetime.timedelta(microseconds=stamp // 10)
     except OverflowError:
         # A corrupt stamp can point far past the last date Python can hold.
         return None
+    if not local_time:
+        return moment
+    # The stamp is in local time, so it is turned into UTC.
+    return _local_stamp_to_utc(moment)
 
 
 def _read_address(dev_info: wt.HANDLE, info: SP_DEVINFO_DATA) -> str:
@@ -373,7 +532,24 @@ def _registry_last_seen(values: dict[str, object]) -> datetime.datetime | None:
     The stamp is stored in local time, so it is converted to UTC before it is
     compared with anything else.
     """
-    stamp = values.get("LastSeen")
+    return _registry_stamp(values, "LastSeen")
+
+
+def _registry_last_connected(values: dict[str, object]) -> datetime.datetime | None:
+    """The moment the link to the device was set up.
+
+    The registry keeps this next to ``LastSeen``. The two are not the
+    same: the last seen stamp follows the device, while this one only
+    changes when the connection is made. A device that was in use an hour
+    ago and is still switched on keeps an hour old stamp here.
+    """
+    return _registry_stamp(values, "LastConnected")
+
+
+def _registry_stamp(values: dict[str, object],
+                    key: str) -> datetime.datetime | None:
+    """Reads one of the registry time stamps of a Bluetooth device."""
+    stamp = values.get(key)
     if not isinstance(stamp, int) or stamp == 0:
         return None
     try:
@@ -419,6 +595,9 @@ def read_devices() -> list[BluetoothDevice]:
     # was last heard from tells whether it is still around. The friendly name
     # often does not say either.
     registry = _read_registry_devices()
+    # The radio says which devices are on the air right now. It is asked
+    # once, because the answer is the same for every device node.
+    radio = _radio_connected_addresses()
     found: dict[str, BluetoothDevice] = {}
     try:
         index = 0
@@ -448,24 +627,71 @@ def read_devices() -> list[BluetoothDevice]:
             plain = _plain_address(address)
             record = registry.get(plain, {})
 
-            connected = _read_boolean_property(
-                dev_info, info, FMTID_DEVICE_ENUM, PID_IS_CONNECTED)
+            # The radio knows which devices it is talking to right now.
+            # That is the only source that is always right, so it wins
+            # over the flags of the device node.
+            radio_state = None
+            for candidate in _radio_address_candidates(plain):
+                if candidate in radio:
+                    radio_state = radio[candidate][0]
+                    break
+            if radio_state is None:
+                # The radio does not mention the device at all. It may
+                # be switched off, or the radio may not have picked it
+                # up. The flags and the stamps of the device node
+                # decide.
+                connected = _read_boolean_property(
+                    dev_info, info, FMTID_DEVICE_ENUM, PID_IS_CONNECTED)
+            else:
+                connected = radio_state
+
             last_report = _read_filetime_property(
                 dev_info, info, FMTID_BLUETOOTH, PID_BATTERY_REPORTED)
+            # The stamp of the device node itself. It is written whenever
+            # the stack did something with the device, so it follows the
+            # device more closely than the registry does. This stamp is
+            # written in local time.
             last_seen = _read_filetime_property(
-                dev_info, info, FMTID_BLUETOOTH_INFO, PID_LAST_CONNECTED)
+                dev_info, info, FMTID_BLUETOOTH_INFO, PID_LAST_CONNECTED,
+                local_time=True)
             registry_seen = _registry_last_seen(record)
+            registry_connected = _registry_last_connected(record)
+
+            # The freshest of the activity stamps is the one that counts.
+            activity = _newest(last_seen, registry_connected)
+
+            if radio_state is not None:
+                # The radio answered for this device, so it decides.
+                reachable = radio_state
+            else:
+                reachable = _is_reachable(connected, registry_seen, now,
+                                          last_report=last_report,
+                                          activity=activity)
 
             found[key] = BluetoothDevice(
                 name=name, address=address, percent=min(100, level),
                 kind=_classify(name, _kind_from_class_of_device(record)),
-                connected=_is_reachable(connected, registry_seen, now),
+                connected=reachable,
                 last_report=last_report,
                 last_seen=last_seen)
     finally:
         setupapi.SetupDiDestroyDeviceInfoList(dev_info)
 
     return sorted(found.values(), key=lambda d: d.name)
+
+
+def _newest(first: datetime.datetime | None,
+            second: datetime.datetime | None) -> datetime.datetime | None:
+    """Returns the later of two time stamps.
+
+    ``None`` means that the stamp is not known, so it never wins over a
+    stamp that is known.
+    """
+    if first is None:
+        return second
+    if second is None:
+        return first
+    return max(first, second)
 
 
 def _plain_address(address: str) -> str:
@@ -478,28 +704,61 @@ def _plain_address(address: str) -> str:
 
 
 def _is_reachable(connected: bool | None, last_seen: datetime.datetime | None,
-                  now: datetime.datetime) -> bool:
+                  now: datetime.datetime,
+                  last_report: datetime.datetime | None = None,
+                  activity: datetime.datetime | None = None) -> bool:
     """Decides whether a device is really reachable right now.
 
-    The PnP connection flag is authoritative when it says the device is
-    connected. When it says the device is gone, the moment the Bluetooth
-    stack last heard from it decides: a device that was seen recently is
-    still around, one that has been silent for a while is off.
+    Windows offers several stamps for this, and none of them is
+    reliable on its own:
 
-    The battery report time cannot be used for this. Windows rewrites the
-    battery property the moment a device disconnects, so a device that just
-    switched off would still look like it had just reported its level.
+    - The "is connected" flag of the device enumeration is only filled in
+      for some kinds of node. On a gamepad or a mouse it stays ``False``
+      even while the device is in use, so it cannot be trusted to say
+      that a device is gone.
+    - The activity stamp of the device node is written whenever the
+      Bluetooth stack does something with the node. It follows the
+      device closely while it is in use.
+    - The battery report stamp is written whenever the peripheral
+      reports its level. A gamepad that sits still reports rarely, so it
+      cannot carry the decision alone.
+    - The stamps of the registry are written when the link is set up. A
+      device that was in use an hour ago and is still switched on keeps
+      an hour old stamp there.
+
+    The activity stamp decides when it is known, because it is the one
+    that follows the device most closely. The battery report is only
+    consulted when there is no activity stamp at all, and it is given a
+    generous timeout, because a gamepad that is switched on but idle
+    reports its level rarely. Only when every stamp says the device is
+    stale is it treated as gone.
     """
+    # The flag is the only source that can say "connected" outright. It
+    # is used as such, but never as the only reason to call a device
+    # gone.
     if connected is True:
         return True
-    if last_seen is None:
-        # Without any proof, fall back to the flag. A node that publishes no
-        # flag at all is assumed to be connected, so a live reading is never
-        # hidden.
-        return bool(connected)
-    age = (now - last_seen).total_seconds()
-    return age <= DEVICE_SEEN_TIMEOUT_SECONDS
 
+    # The activity stamp follows the device closely, so it decides on
+    # its own. When it says the device is stale, the device is stale.
+    if activity is not None:
+        age = (now - activity).total_seconds()
+        return age <= DEVICE_ACTIVITY_TIMEOUT_SECONDS
+
+    # Without an activity stamp the battery report takes over. It says
+    # that the peripheral was alive when it reported its level.
+    if last_report is not None:
+        age = (now - last_report).total_seconds()
+        return age <= DEVICE_BATTERY_TIMEOUT_SECONDS
+
+    # The "last seen" stamp of the stack is the fallback.
+    if last_seen is not None:
+        age = (now - last_seen).total_seconds()
+        return age <= DEVICE_SEEN_TIMEOUT_SECONDS
+
+    # Nothing is known at all. Without proof the device is assumed to be
+    # there, so a live reading is never hidden.
+    return True
 def read_headsets() -> list[BluetoothDevice]:
     """Returns only the headset-like devices."""
     return [d for d in read_devices() if is_headset_like(d.name, d.kind)]

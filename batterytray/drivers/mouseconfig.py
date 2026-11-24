@@ -44,6 +44,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
+from . import hidsupport
 from .razer import (
     FEATURE_REPORT_LENGTH,
     RAZER_DEVICES,
@@ -379,10 +380,8 @@ def _query_checked(handle: _HidHandle, transaction_id: int,
 
 def _candidate_interfaces() -> list[dict]:
     """Lists the HID interfaces that can carry mouse configuration commands."""
-    import hid
-
     candidates = []
-    for dev in hid.enumerate(RAZER_VID):
+    for dev in hidsupport.enumerate_interfaces(RAZER_VID):
         is_mouse = (dev["usage_page"] == USAGE_PAGE_GENERIC_DESKTOP
                     and dev["usage"] == USAGE_MOUSE)
         if not is_mouse:

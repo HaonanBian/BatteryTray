@@ -17,7 +17,7 @@ import pystray
 from . import autostart, singleton
 from .config import Config, config_dir
 from .drivers import (asusmouse, bluetooth, hidvendor, logitech, razer,
-                      vendor2)
+                      vendor2, xbox)
 from .icon import DeviceState, build_device_icon, build_icon
 from . import update
 from .update import UpdateError, check_for_update
@@ -30,9 +30,10 @@ KIND_CONTROLLER = "controller"
 KIND_KEYBOARD = "keyboard"
 KIND_OTHER = "device"
 
-# Kinds shown by default. The Xbox controller and keyboards are deliberately
-# left out: the user asked for mouse and headset levels.
-DEFAULT_KINDS = (KIND_MOUSE, KIND_HEADSET)
+# Kinds shown by default. A gamepad and a keyboard report their battery
+# level like every other peripheral, so they are shown as well. A user who
+# does not want them can switch them off in the settings window.
+DEFAULT_KINDS = (KIND_MOUSE, KIND_HEADSET, KIND_CONTROLLER, KIND_KEYBOARD)
 
 
 @dataclass
@@ -109,98 +110,42 @@ class Device:
         return rows
 
 
-def collect_devices(config: Config) -> list[Device]:
+def collect_devices(config: Config) -> tuple[list[Device], list[str]]:
     """Polls every driver and returns the devices that answered.
 
     Mice and headsets are reported first. Other Bluetooth peripherals (game
     controllers, keyboards) are only included when the config asks for them.
+
+    Every driver is polled on its own. A driver that fails, because the
+    hardware is not there or because Windows denies it, must not take the
+    other drivers down with it. Otherwise a single unhappy driver leaves
+    the user with an empty list and no way to tell what went wrong.
+
+    The second value of the result names the drivers that failed, so that
+    the problem can be shown to the user.
     """
     devices: list[Device] = []
+    failures: list[str] = []
 
-    for razer_device in razer.read_devices():
-        devices.append(Device(
-            name=razer_device.name,
-            # A sleeping mouse has no battery level to show.
-            percent=razer_device.percent if razer_device.connected else None,
-            charging=razer_device.charging,
-            kind=KIND_MOUSE,
-            product_id=razer_device.product_id,
-            connection=razer_device.connection,
-            polling_rate=razer_device.polling_rate,
-            dpi=razer_device.dpi,
-            connected=razer_device.connected,
-        ))
-
-    for asus_device in asusmouse.read_devices():
-        devices.append(Device(
-            name=asus_device.name,
-            percent=asus_device.percent,
-            charging=asus_device.charging,
-            kind=KIND_MOUSE,
-            product_id=asus_device.product_id,
-            connection=asus_device.connection,
-            polling_rate=asus_device.polling_rate,
-            dpi=asus_device.dpi,
-        ))
-
-    for logitech_device in logitech.read_devices():
-        devices.append(Device(
-            name=logitech_device.name,
-            percent=logitech_device.percent,
-            charging=logitech_device.charging,
-            kind=logitech_device.kind,
-            product_id=logitech_device.product_id,
-            connection=logitech_device.connection,
-            connected=logitech_device.connected,
-        ))
-
-    for vendor_device in hidvendor.read_devices():
-        devices.append(Device(
-            name=vendor_device.name,
-            percent=vendor_device.percent,
-            charging=vendor_device.charging,
-            kind=vendor_device.kind,
-            product_id=vendor_device.product_id,
-            connection=vendor_device.connection,
-            connected=vendor_device.connected,
-        ))
-
-    for extra_device in vendor2.read_devices():
+    for read in (_read_razer, _read_asus, _read_logitech, _read_hidvendor,
+                 _read_vendor2, _read_xbox, _read_bluetooth):
+        try:
+            found = read()
+        except Exception as error:
+            # The driver did not manage to answer. The other drivers are
+            # still asked, so that the devices they know about are shown.
+            failures.append(f"{read.__name__[6:]}: {error}")
+            continue
         # The same peripheral can be found by two drivers, e.g. when it is
         # reachable over both a 2.4G receiver and a cable. The first
-        # reading that arrives is the one that is shown.
-        if any(d.name.lower() == extra_device.name.lower() for d in devices):
-            continue
-        devices.append(Device(
-            name=extra_device.name,
-            percent=extra_device.percent,
-            charging=extra_device.charging,
-            kind=extra_device.kind,
-            product_id=extra_device.product_id,
-            connection=extra_device.connection,
-        ))
-
-    for bt_device in bluetooth.read_devices():
-        # The same peripheral can be exposed through its HID receiver and
-        # through the Bluetooth stack. Keep the reading from the dedicated
-        # HID driver, which is the live one.
-        if any(d.kind == bt_device.kind
-               and d.name.lower() in bt_device.name.lower()
-               for d in devices):
-            continue
-        connected = getattr(bt_device, "connected", True)
-        devices.append(Device(
-            name=bt_device.name,
-            # A disconnected device must not show a battery bar: Windows keeps
-            # the last reported level on the device node, so the number would
-            # be a stale reading from the last time the device was used.
-            percent=bt_device.percent if connected else None,
-            charging=False,
-            kind=bt_device.kind,
-            address=bt_device.address,
-            connection=_bluetooth_connection(bt_device),
-            connected=connected,
-        ))
+        # reading that arrives is the one that is shown, because the
+        # dedicated HID driver gives the live value.
+        for device in found:
+            if any(d.kind == device.kind
+                   and d.name.lower() in device.name.lower()
+                   for d in devices):
+                continue
+            devices.append(device)
 
     if config.devices:
         wanted = {name.lower() for name in config.devices}
@@ -221,7 +166,129 @@ def collect_devices(config: Config) -> list[Device]:
 
     devices.sort(key=lambda d: (d.priority, d.percent if d.percent is not None else 101,
                                  d.name))
-    return devices
+    return devices, failures
+
+
+def _read_razer() -> list[Device]:
+    """Reads the Razer mice."""
+    found: list[Device] = []
+    for razer_device in razer.read_devices():
+        found.append(Device(
+            name=razer_device.name,
+            # A sleeping mouse has no battery level to show.
+            percent=razer_device.percent if razer_device.connected else None,
+            charging=razer_device.charging,
+            kind=KIND_MOUSE,
+            product_id=razer_device.product_id,
+            connection=razer_device.connection,
+            polling_rate=razer_device.polling_rate,
+            dpi=razer_device.dpi,
+            connected=razer_device.connected,
+        ))
+    return found
+
+
+def _read_asus() -> list[Device]:
+    """Reads the ASUS mice."""
+    found: list[Device] = []
+    for asus_device in asusmouse.read_devices():
+        found.append(Device(
+            name=asus_device.name,
+            percent=asus_device.percent,
+            charging=asus_device.charging,
+            kind=KIND_MOUSE,
+            product_id=asus_device.product_id,
+            connection=asus_device.connection,
+            polling_rate=asus_device.polling_rate,
+            dpi=asus_device.dpi,
+        ))
+    return found
+
+
+def _read_logitech() -> list[Device]:
+    """Reads the Logitech devices."""
+    found: list[Device] = []
+    for logitech_device in logitech.read_devices():
+        found.append(Device(
+            name=logitech_device.name,
+            percent=logitech_device.percent,
+            charging=logitech_device.charging,
+            kind=logitech_device.kind,
+            product_id=logitech_device.product_id,
+            connection=logitech_device.connection,
+            connected=logitech_device.connected,
+        ))
+    return found
+
+
+def _read_hidvendor() -> list[Device]:
+    """Reads the mice of the simple vendor protocols."""
+    found: list[Device] = []
+    for vendor_device in hidvendor.read_devices():
+        found.append(Device(
+            name=vendor_device.name,
+            percent=vendor_device.percent,
+            charging=vendor_device.charging,
+            kind=vendor_device.kind,
+            product_id=vendor_device.product_id,
+            connection=vendor_device.connection,
+            connected=vendor_device.connected,
+        ))
+    return found
+
+
+def _read_vendor2() -> list[Device]:
+    """Reads the mice of the documented vendor protocols."""
+    found: list[Device] = []
+    for extra_device in vendor2.read_devices():
+        found.append(Device(
+            name=extra_device.name,
+            percent=extra_device.percent,
+            charging=extra_device.charging,
+            kind=extra_device.kind,
+            product_id=extra_device.product_id,
+            connection=extra_device.connection,
+        ))
+    return found
+
+
+def _read_xbox() -> list[Device]:
+    """Reads the controllers that XInput knows about.
+
+    A controller that is reached over a cable or a wireless adapter has
+    no Bluetooth node, so XInput is the only source for it.
+    """
+    found: list[Device] = []
+    for pad in xbox.read_devices():
+        found.append(Device(
+            name=pad.name,
+            percent=pad.percent,
+            charging=pad.charging,
+            kind=KIND_CONTROLLER,
+            connected=pad.connected,
+            connection="无线连接" if pad.wireless else "有线连接",
+        ))
+    return found
+
+
+def _read_bluetooth() -> list[Device]:
+    """Reads the Bluetooth peripherals."""
+    found: list[Device] = []
+    for bt_device in bluetooth.read_devices():
+        connected = getattr(bt_device, "connected", True)
+        found.append(Device(
+            name=bt_device.name,
+            # A disconnected device must not show a battery bar: Windows keeps
+            # the last reported level on the device node, so the number would
+            # be a stale reading from the last time the device was used.
+            percent=bt_device.percent if connected else None,
+            charging=False,
+            kind=bt_device.kind,
+            address=bt_device.address,
+            connection=_bluetooth_connection(bt_device),
+            connected=connected,
+        ))
+    return found
 
 
 def _bluetooth_connection(device) -> str:
@@ -342,16 +409,13 @@ class TrayApp:
 
     def _poll(self) -> None:
         """Reads the devices and refreshes the icon and the window."""
-        try:
-            devices = collect_devices(self.config)
-        except Exception:
-            devices = []
+        devices, failures = collect_devices(self.config)
 
         with self._lock:
             self.devices = devices
 
         self._refresh_window(devices)
-        self._write_status(devices)
+        self._write_status(devices, failures)
         self._check_low_battery(devices)
 
     def _refresh_window(self, devices: list[Device]) -> None:
@@ -404,8 +468,14 @@ class TrayApp:
         # read again.
         self.request_refresh()
 
-    def _write_status(self, devices: list[Device]) -> None:
-        """Records the latest reading so it can be inspected later."""
+    def _write_status(self, devices: list[Device],
+                      failures: list[str] | None = None) -> None:
+        """Records the latest reading so it can be inspected later.
+
+        The file also names the drivers that failed, so that a user who
+        sees nothing can find out which part of the machine is the
+        problem.
+        """
         lines = [f"updated {time.strftime('%Y-%m-%d %H:%M:%S')}"]
         for device in devices:
             if not device.connected:
@@ -416,6 +486,10 @@ class TrayApp:
                 level = f"{device.percent}%"
             charging = " (charging)" if device.charging else ""
             lines.append(f"{device.name}: {level}{charging} [{device.kind}]")
+        if not devices:
+            lines.append("no devices found")
+        for failure in failures or []:
+            lines.append(f"driver failed: {failure}")
         try:
             directory = config_dir()
             directory.mkdir(parents=True, exist_ok=True)

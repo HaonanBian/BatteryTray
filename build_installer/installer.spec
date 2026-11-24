@@ -12,6 +12,7 @@ a = Analysis(
         ('D:\\Desktop\\a\\assets\\batterytray.ico', 'payload/assets'),
         ('D:\\Desktop\\a\\assets\\batterytray.png', 'payload/assets'),
         ('D:\\Desktop\\a\\README.md', 'payload'),
+        ('D:\\Desktop\\a\\check_batterytray.py', 'payload'),
     ],
     hiddenimports=[
         'installer',

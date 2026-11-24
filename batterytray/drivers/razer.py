@@ -34,7 +34,7 @@ import time
 from dataclasses import dataclass
 from enum import IntEnum
 
-import hid
+from . import hidsupport
 
 # Razer USB vendor id.
 RAZER_VID = 0x1532
@@ -297,7 +297,7 @@ def _supports_charging(product_id: int) -> bool:
 def _candidate_interfaces() -> list[dict]:
     """Lists HID interfaces that may carry the Razer battery query."""
     candidates = []
-    for dev in hid.enumerate(RAZER_VID):
+    for dev in hidsupport.enumerate_interfaces(RAZER_VID):
         # The battery query lives on the mouse collection, or on a vendor
         # collection for headsets and other non-mouse peripherals.
         is_mouse = (dev["usage_page"] == USAGE_PAGE_GENERIC_DESKTOP

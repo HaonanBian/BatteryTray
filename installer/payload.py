@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "BatteryTray"
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.3.3"
 PUBLISHER = "BatteryTray"
 
 # The per-user uninstall entry. It lives under HKEY_CURRENT_USER, so no
@@ -333,7 +333,7 @@ def install(install_dir: Path, desktop_shortcut: bool = True,
     install_dir.mkdir(parents=True, exist_ok=True)
 
     report("正在复制程序文件…")
-    for name in ("BatteryTray.exe", "README.md"):
+    for name in ("BatteryTray.exe", "README.md", "check_batterytray.py"):
         candidate = source / name
         if candidate.is_file():
             _copy_with_retry(candidate, install_dir / name)

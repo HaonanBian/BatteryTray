@@ -26,6 +26,8 @@ from dataclasses import dataclass
 
 import hid
 
+from . import hidsupport
+
 LOGITECH_VID = 0x046D
 HIDPP_USAGE_PAGE = 0xFF00
 
@@ -298,7 +300,7 @@ class LogitechHidpp:
 def _interfaces() -> list[dict]:
     """Returns the vendor HID interfaces that can carry HID++."""
     found = []
-    for dev in hid.enumerate(LOGITECH_VID):
+    for dev in hidsupport.enumerate_interfaces(LOGITECH_VID):
         if dev.get("vendor_id") != LOGITECH_VID:
             continue
         if dev.get("usage_page") != HIDPP_USAGE_PAGE:

@@ -28,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "build_installer"
 DIST = ROOT / "release"
-VERSION = "1.3.2"
+VERSION = "1.3.3"
 
 APP_NAME = "BatteryTray"
 APP_EXE = "BatteryTray.exe"
@@ -75,6 +75,11 @@ def build_installer_exe(app_exe: Path | None = None) -> Path:
         readme = ROOT / "README.md"
         if readme.is_file():
             bundled.append(f"({str(readme)!r}, 'payload')")
+        # The check script travels with the application, so that a user
+        # whose devices are not shown can find out why.
+        check_script = ROOT / "check_batterytray.py"
+        if check_script.is_file():
+            bundled.append(f"({str(check_script)!r}, 'payload')")
 
     datas = ""
     if bundled:

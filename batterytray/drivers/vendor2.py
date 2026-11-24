@@ -28,6 +28,8 @@ from dataclasses import dataclass
 
 import hid
 
+from . import hidsupport
+
 from . import devices
 
 
@@ -1178,7 +1180,7 @@ def _asus_omni_name(dev: dict) -> str | None:
         return None
 
     # The control channel is the one on usage page 0xFF02.
-    for candidate in hid.enumerate(0x0B05):
+    for candidate in hidsupport.enumerate_interfaces(0x0B05):
         if candidate.get("product_id") != product_id:
             continue
         if candidate.get("usage_page") != ASUS_OMNI_CONTROL_PAGE:
@@ -1476,7 +1478,7 @@ def _candidate_interfaces() -> list[tuple[dict, Protocol]]:
     """
     result: list[tuple[dict, Protocol]] = []
     seen: set[tuple[int, int, int]] = set()
-    for dev in hid.enumerate():
+    for dev in hidsupport.enumerate_interfaces():
         vendor_id = dev.get("vendor_id")
         product_id = dev.get("product_id", 0)
         page = dev.get("usage_page")

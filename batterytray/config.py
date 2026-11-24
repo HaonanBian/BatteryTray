@@ -10,8 +10,14 @@ from pathlib import Path
 APP_DIR_NAME = "BatteryTray"
 
 # The kinds of peripheral the app knows about.
-DEFAULT_KINDS = ("mouse", "headset")
-EXTRA_KINDS = ("controller", "keyboard")
+#
+# A gamepad and a keyboard are shown by default as well. They report
+# their battery level like every other peripheral, and leaving them out
+# means that a user whose only device is a controller sees nothing at
+# all. A user who does not want them can switch them off in the
+# settings window.
+DEFAULT_KINDS = ("mouse", "headset", "controller", "keyboard")
+EXTRA_KINDS = ()
 ALL_KINDS = DEFAULT_KINDS + EXTRA_KINDS
 
 
@@ -100,8 +106,9 @@ class Config:
         wanted = [k for k in kinds if k in ALL_KINDS]
         self.enabled_kinds = wanted
         # The old switch stays in sync so an old config file still behaves.
-        self.include_other_peripherals = any(
-            k not in DEFAULT_KINDS for k in wanted)
+        # Every kind is shown by default now, so the switch only says that
+        # the user asked for everything.
+        self.include_other_peripherals = len(wanted) == len(ALL_KINDS)
 
     def display_name(self, name: str) -> str:
         """The name shown for a device, honouring a custom one."""

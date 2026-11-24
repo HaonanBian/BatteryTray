@@ -18,6 +18,8 @@ from dataclasses import dataclass
 
 import hid
 
+from . import hidsupport
+
 # The vendor collections are matched by vendor id and usage page, not by
 # product id, because one receiver may serve several model ids.
 @dataclass(frozen=True)
@@ -248,7 +250,7 @@ def _candidate_interfaces() -> list[tuple[dict, VendorProtocol]]:
     """Returns one (HID interface, protocol) pair for every match."""
     result = []
     seen: set[tuple[int, int, str]] = set()
-    for dev in hid.enumerate():
+    for dev in hidsupport.enumerate_interfaces():
         vid = dev.get("vendor_id")
         page = dev.get("usage_page")
         if not isinstance(page, int):
@@ -276,7 +278,7 @@ def read_vxe_keyboards() -> list[HidBatteryDevice]:
     unused, so a failed read is cached briefly and retried on a later poll.
     """
     found: list[HidBatteryDevice] = []
-    for dev in hid.enumerate(VXE_KEYBOARD_VID):
+    for dev in hidsupport.enumerate_interfaces(VXE_KEYBOARD_VID):
         if dev.get("product_id") not in VXE_KEYBOARD_PIDS:
             continue
         if dev.get("usage_page") != VXE_KEYBOARD_USAGE_PAGE:

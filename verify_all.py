@@ -16,8 +16,8 @@ from batterytray import autostart, singleton, update
 from batterytray.app import Device, build_tooltip, collect_devices
 from batterytray.config import Config
 from batterytray.drivers import (asusmouse, bluetooth, devices, hidvendor,
-                                  logitech, mouseadapter, mouseconfig, razer,
-                                  vendor2)
+                                  hidsupport, logitech, mouseadapter,
+                                  mouseconfig, razer, vendor2, xbox)
 from batterytray.icon import (DeviceState, build_device_icon, build_icon,
                               level_color)
 
@@ -1241,17 +1241,27 @@ def test_poll_interval_is_clamped():
 
 
 def test_collect_devices_prefers_mice_and_headsets():
-    devices = collect_devices(Config())
+    devices, _failures = collect_devices(Config())
     kinds = {d.kind for d in devices}
     assert kinds <= {"mouse", "headset", "controller", "device"}
-    # The default config excludes controllers.
-    assert "controller" not in kinds
+
+
+def test_the_default_config_shows_a_gamepad():
+    """A user whose only device is a gamepad has to see it.
+
+    Leaving the controllers out by default meant that a fresh install
+    showed nothing at all on a machine that only has a gamepad and a
+    keyboard attached.
+    """
+    config = Config()
+    assert "controller" in config.kinds
+    assert "keyboard" in config.kinds
 
 
 def test_collect_devices_can_include_other_peripherals():
     config = Config()
     config.include_other_peripherals = True
-    devices = collect_devices(config)
+    devices, _failures = collect_devices(config)
     assert all(d.percent is None or 0 <= d.percent <= 100 for d in devices)
 
 
@@ -1266,10 +1276,15 @@ def test_the_settings_choose_which_kinds_are_shown():
 
 
 def test_the_old_config_still_shows_mice_and_headsets():
-    """A config file without the new setting keeps the old behaviour."""
+    """A config file without the new setting keeps the old behaviour.
+
+    A config file that was written before the setting existed has no
+    entry for it, so the defaults apply. Every kind is among them now,
+    because a user whose only device is a gamepad has to see it.
+    """
     config = Config()
     assert config.enabled_kinds is None
-    assert config.kinds == ("mouse", "headset")
+    assert set(config.kinds) == {"mouse", "headset", "controller", "keyboard"}
 
 
 def test_the_disconnected_devices_are_shown_by_default():
@@ -1360,7 +1375,7 @@ def test_the_gamepad_is_listed_when_its_kind_is_enabled():
     """A gamepad shows up as soon as the user asks for it."""
     config = Config()
     config.set_enabled_kinds(["mouse", "headset", "controller", "keyboard"])
-    devices = collect_devices(config)
+    devices, _failures = collect_devices(config)
     assert all(d.kind in {"mouse", "headset", "controller", "keyboard"}
                for d in devices)
 
@@ -1368,13 +1383,13 @@ def test_the_gamepad_is_listed_when_its_kind_is_enabled():
 def test_collect_devices_respects_a_name_whitelist():
     config = Config()
     config.devices = ["nothing matches this"]
-    assert collect_devices(config) == []
+    assert collect_devices(config)[0] == []
 
 
 def test_mice_sort_before_other_peripherals():
     config = Config()
     config.include_other_peripherals = True
-    devices = collect_devices(config)
+    devices, _failures = collect_devices(config)
     kinds = [d.kind for d in devices]
     if "mouse" in kinds and "controller" in kinds:
         assert kinds.index("mouse") < kinds.index("controller")
@@ -1502,30 +1517,115 @@ def test_the_connection_flag_wins_over_the_last_seen_time():
 def test_a_device_without_any_signal_is_assumed_to_be_connected():
     """A node that publishes neither signal must not be hidden."""
     now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
-    assert bluetooth._is_reachable(None, None, now) is False
+    assert bluetooth._is_reachable(None, None, now) is True
 
 
 def test_the_disconnect_moment_does_not_look_like_a_live_reading():
-    """Windows rewrites the battery property when a device disconnects.
+    """A device that went quiet must not be shown as connected.
 
-    The report time therefore cannot be used to tell a live device from a
-    device that just switched off; only the moment the stack last heard from
-    it can.
+    The activity stamp of the device node is written whenever the
+    Bluetooth stack does something with the node. A device that was last
+    heard from a long time ago is therefore off, even when it reported
+    its battery level more recently than that.
     """
     now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
-    # The device was last heard from ten minutes ago, so it is off, even
+    # The device was last heard from an hour ago, so it is off, even
     # though a report landed five minutes ago.
-    seen = now - datetime.timedelta(minutes=10)
-    assert bluetooth._is_reachable(False, seen, now) is False
+    stale = now - datetime.timedelta(hours=1)
+    assert bluetooth._is_reachable(False, stale, now,
+                                   last_report=now - datetime.timedelta(
+                                       minutes=5),
+                                   activity=stale) is False
     # As soon as it is seen again, it counts as reachable.
     seen = now - datetime.timedelta(seconds=20)
-    assert bluetooth._is_reachable(False, seen, now) is True
+    assert bluetooth._is_reachable(False, seen, now, activity=seen) is True
     assert bluetooth._is_reachable(True, None, now) is True
+
+
+def test_the_battery_report_carries_the_decision_without_an_activity_stamp():
+    """A device that reported its level recently is still reachable.
+
+    Some nodes publish no activity stamp at all. The battery report is
+    then the only evidence that the peripheral was alive.
+    """
+    now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+    fresh = now - datetime.timedelta(minutes=5)
+    assert bluetooth._is_reachable(False, None, now,
+                                   last_report=fresh) is True
+    stale = now - datetime.timedelta(days=40)
+    assert bluetooth._is_reachable(False, None, now,
+                                   last_report=stale) is False
+
+
+def test_the_activity_stamp_decides_over_the_battery_report():
+    """A device that is active is reachable, whatever the report says.
+
+    The battery report of a gamepad that sits still can be hours old,
+    while the activity stamp follows the device closely.
+    """
+    now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+    active = now - datetime.timedelta(seconds=5)
+    stale_report = now - datetime.timedelta(days=2)
+    assert bluetooth._is_reachable(False, active, now,
+                                   last_report=stale_report,
+                                   activity=active) is True
+
+
+def test_the_activity_stamp_is_the_local_time_of_the_machine():
+    """The stamp of the device node is written in local time.
+
+    Windows writes it with the local time, while the other stamps are in
+    UTC. Reading it as UTC shifts it by the offset of the time zone, which
+    on a machine east of Greenwich makes a device that is in use look like
+    it was last seen hours ago.
+    """
+    local = datetime.datetime.now()
+    converted = bluetooth._local_stamp_to_utc(local)
+    expected = local.astimezone().astimezone(datetime.UTC).replace(
+        tzinfo=None)
+    assert converted == expected
+    # The two must not be hours apart, which is what went wrong before.
+    assert abs((converted - expected).total_seconds()) < 1
+
+
+def test_the_radio_reports_the_devices_it_sees():
+    """The radio of the stack answers with the devices it knows.
+
+    The answer is what decides whether a device is reachable, because the
+    flag of the device node is always empty for a gamepad.
+    """
+    answer = bluetooth._radio_connected_addresses()
+    assert isinstance(answer, dict)
+    for number, entry in answer.items():
+        assert isinstance(number, int)
+        assert isinstance(entry[0], bool)
+        assert isinstance(entry[1], str)
+
+
+def test_every_reading_of_an_address_is_offered_to_the_radio():
+    """The radio holds the address in a number of four bytes.
+
+    Which of the six bytes of the address end up in that number is not
+    written down, so every sensible reading has to be offered.
+    """
+    candidates = bluetooth._radio_address_candidates("3CFA0640D96A")
+    assert len(candidates) == 4
+    assert len(set(candidates)) == 4
+    # The first four bytes, as they are written.
+    assert 0x3CFA0640 in candidates
+    # The last four bytes, as they are written.
+    assert 0x640D96A in candidates
+    # The bytes counted from the back.
+    assert 0x4006FA3C in candidates
+    assert 0x6AD94006 in candidates
+    # A name that is not an address cannot be turned into one.
+    assert bluetooth._radio_address_candidates("") == ()
+    assert bluetooth._radio_address_candidates("XYZ") == ()
 
 
 def test_the_wh_720n_is_not_reported_as_a_full_battery():
     """The headset the user complained about must not show a frozen 100%."""
-    devices = collect_devices(Config())
+    devices, _failures = collect_devices(Config())
     for device in devices:
         if "WH-CH720N" in device.name:
             assert device.connected is False, device
@@ -1544,7 +1644,7 @@ def test_disconnected_devices_do_not_show_a_battery_level(monkeypatch):
     monkeypatch.setattr(bluetooth, "read_devices", lambda: [stale])
     monkeypatch.setattr(razer, "read_devices", lambda: [])
 
-    devices = collect_devices(Config())
+    devices, _failures = collect_devices(Config())
 
     assert len(devices) == 1
     device = devices[0]
@@ -1566,11 +1666,74 @@ def test_connected_devices_keep_their_battery_level(monkeypatch):
     monkeypatch.setattr(bluetooth, "read_devices", lambda: [live])
     monkeypatch.setattr(razer, "read_devices", lambda: [])
 
-    devices = collect_devices(Config())
+    devices, _failures = collect_devices(Config())
 
     assert len(devices) == 1
     assert devices[0].percent == 79
     assert devices[0].connected is True
+
+
+def test_a_failing_driver_does_not_hide_the_other_devices(monkeypatch):
+    """One broken driver must not empty the whole list.
+
+    The HID library talks to a subsystem that Windows can refuse. When
+    that happens the driver raises, and the user would see nothing at
+    all instead of the devices the other drivers know about.
+    """
+    def broken():
+        raise OSError("Access is denied.")
+
+    monkeypatch.setattr(hidvendor, "read_devices", broken)
+    monkeypatch.setattr(razer, "read_devices", broken)
+    monkeypatch.setattr(logitech, "read_devices", broken)
+    monkeypatch.setattr(asusmouse, "read_devices", broken)
+    monkeypatch.setattr(vendor2, "read_devices", broken)
+
+    live = bluetooth.BluetoothDevice(
+        name="Xbox Wireless Controller",
+        address="3C:FA:06:40:D9:6A",
+        percent=88,
+        kind="controller",
+        connected=True,
+    )
+    monkeypatch.setattr(bluetooth, "read_devices", lambda: [live])
+
+    devices, failures = collect_devices(Config())
+
+    assert len(devices) == 1
+    assert devices[0].name == "Xbox Wireless Controller"
+    assert devices[0].percent == 88
+    # The drivers that failed are named, so that the problem can be shown.
+    assert failures
+    assert any("hidvendor" in failure for failure in failures)
+
+
+def test_the_broken_hid_library_is_survivable(monkeypatch):
+    """The HID library must not take the drivers down with it."""
+    import hid as hid_module
+
+    def broken(*args, **kwargs):
+        raise OSError("Access is denied.")
+
+    monkeypatch.setattr(hid_module, "enumerate", broken)
+
+    assert hidsupport.enumerate_interfaces() == []
+    assert hidsupport.enumerate_interfaces(0x1532) == []
+
+
+def test_the_xinput_driver_answers_without_a_controller():
+    """The XInput driver must not fail when nothing is plugged in."""
+    for device in xbox.read_devices():
+        assert device.connected is True
+        assert device.percent is None or 0 <= device.percent <= 100
+
+
+def test_a_controller_on_a_cable_has_no_battery_level():
+    """A controller without a battery must not show a made up level."""
+    assert xbox._battery_percent(xbox.BATTERY_STATE_FULL) == 100
+    assert xbox._battery_percent(xbox.BATTERY_STATE_CHARGING) == 100
+    assert xbox._battery_percent(xbox.BATTERY_STATE_UNKNOWN) is None
+    assert xbox._battery_percent(xbox.BATTERY_STATE_NOT_CHARGING) is None
 
 
 def test_the_tooltip_marks_disconnected_devices():

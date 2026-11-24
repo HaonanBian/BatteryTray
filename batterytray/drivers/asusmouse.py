@@ -42,6 +42,8 @@ from dataclasses import dataclass, field
 
 import hid
 
+from . import hidsupport
+
 ASUS_VID = 0x0B05
 
 # The product id of the mouse depends on the connection.
@@ -692,7 +694,7 @@ def _is_control_interface(dev: dict) -> bool:
 def _candidate_interfaces() -> list[dict]:
     """Lists the ASUS HID interfaces that can carry the settings."""
     candidates = []
-    for dev in hid.enumerate(ASUS_VID):
+    for dev in hidsupport.enumerate_interfaces(ASUS_VID):
         if dev.get("vendor_id") != ASUS_VID:
             continue
         if not _is_control_interface(dev):
