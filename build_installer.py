@@ -177,6 +177,11 @@ def make_portable(app_exe: Path) -> Path:
     readme = ROOT / "README.md"
     if readme.exists():
         shutil.copy2(readme, stage / "README.md")
+    # The check script travels with the application, so that a user whose
+    # devices are not shown can find out why.
+    check_script = ROOT / "check_batterytray.py"
+    if check_script.exists():
+        shutil.copy2(check_script, stage / "check_batterytray.py")
 
     DIST.mkdir(parents=True, exist_ok=True)
     archive = DIST / f"{APP_NAME}-{VERSION}-portable.zip"
