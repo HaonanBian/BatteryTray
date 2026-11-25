@@ -1631,6 +1631,35 @@ def test_the_report_says_which_driver_failed():
         assert "失败的驱动" in report
 
 
+def test_a_long_report_is_shortened_for_the_browser():
+    """A report that is too long for the address of a browser is cut.
+
+    The browser only takes an address of a few thousand characters. The
+    important parts have to survive the cut, because they are the ones
+    that say what went wrong.
+    """
+    from batterytray import diagnosticdialog
+    from batterytray.diagnostics import build_report
+
+    report = build_report()
+    assert len(report) > 100
+
+    shortened = diagnosticdialog._shorten(report)
+    assert len(shortened) <= diagnosticdialog.BODY_LIMIT
+    # The parts that matter are still there.
+    assert "每个驱动" in shortened
+    assert "应用最终显示的设备" in shortened
+    # The long list of the HID interfaces is the first thing to go.
+    assert "HID 接口数" in shortened
+
+
+def test_the_issue_page_is_the_one_of_the_project():
+    """The report has to lead to the issue page of this project."""
+    from batterytray import diagnosticdialog
+
+    assert "HaonanBian/BatteryTray" in diagnosticdialog.ISSUE_URL
+
+
 def test_the_diagnostic_button_is_in_the_settings():
     """The settings window has to offer the report."""
     from batterytray.settingsdialog import SettingsDialog
@@ -1639,39 +1668,33 @@ def test_the_diagnostic_button_is_in_the_settings():
     assert hasattr(SettingsDialog, "_diagnostic_hint")
 
 
-def test_the_diagnostic_button_is_always_in_sight():
+def test_the_diagnostic_button_is_always_in_sight(gui_window):
     """The button that opens the report has to be in the footer.
 
     The button used to sit in a group of its own, which meant that it
     could only be reached after scrolling to the bottom.
     """
-    import tkinter as tk
-
     from batterytray.config import Config
     from batterytray.settingsdialog import SettingsDialog
 
-    root = tk.Tk()
-    root.withdraw()
-    try:
-        dialog = SettingsDialog(root, Config(), "TkDefaultFont", 96.0)
-        dialog.update_idletasks()
-        buttons = []
+    dialog = SettingsDialog(gui_window, Config(), gui_window.family,
+                            gui_window.dpi)
+    dialog.update_idletasks()
+    buttons = []
 
-        def walk(widget):
-            for child in widget.winfo_children():
-                if type(child).__name__ == "GlassButton":
-                    buttons.append(child)
-                walk(child)
+    def walk(widget):
+        for child in widget.winfo_children():
+            if type(child).__name__ == "GlassButton":
+                buttons.append(child)
+            walk(child)
 
-        walk(dialog)
-        assert buttons, "设置窗口里没有按钮"
-        # The button sits in the footer, so it is on screen from the start.
-        diagnostic = [b for b in buttons if b._text == "诊断"]
-        assert diagnostic, "设置窗口里没有诊断按钮"
-        assert diagnostic[0].winfo_ismapped(), "诊断按钮被藏起来了"
-        dialog.destroy()
-    finally:
-        root.destroy()
+    walk(dialog)
+    assert buttons, "设置窗口里没有按钮"
+    # The button sits in the footer, so it is on screen from the start.
+    diagnostic = [b for b in buttons if b._text == "诊断"]
+    assert diagnostic, "设置窗口里没有诊断按钮"
+    assert diagnostic[0].winfo_ismapped(), "诊断按钮被藏起来了"
+    dialog.destroy()
 
 
 def test_bluetooth_reads_a_headset():

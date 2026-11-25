@@ -40,6 +40,11 @@ BADGE_INK = "#20252C"
 # The page the issue is opened on.
 ISSUE_URL = f"https://github.com/{REPO_OWNER}/{REPO_NAME}/issues/new"
 
+# How much of the report fits into the address of the browser. The text is
+# escaped before it is put into the address, and the escaping can make it
+# twice as long, so the room is kept small enough for that.
+BODY_LIMIT = 2000
+
 
 def _badge(canvas: tk.Canvas, size: float, color: str) -> None:
     """Draws the round badge of the heading.
@@ -237,21 +242,22 @@ class DiagnosticDialog(tk.Toplevel):
     def _open_issue(self) -> None:
         """Opens the page of a new issue with the report in it.
 
-        The report is put into the body of the issue. When the browser is
-        not able to take that much text, the report is written to a file
-        and the file is mentioned instead.
+        The report is put into the body of the issue. A browser only
+        takes an address of a few thousand characters, so a long report
+        is shortened. The important parts are kept and the whole report
+        is written to a file, so that nothing is really lost.
         """
         if not self.report:
             return
         title = f"诊断报告 · v{__version__} · {_stamp()}"
         body = self.report
 
-        # A very long body does not fit into the address of the browser,
-        # so it is shortened and the rest is saved next to the program.
-        if len(body) > 6000:
+        # A long body does not fit into the address of the browser, so it
+        # is shortened and the whole report is saved next to the program.
+        if len(body) > BODY_LIMIT:
             saved = self._save_quietly()
-            body = (body[:6000] + "\n\n…（报告太长，"
-                    "完整内容在 " + saved + "）")
+            body = _shorten(body) + ("\n\n…（报告太长，"
+                                     "完整内容在 " + saved + "）")
         url = f"{ISSUE_URL}?title={_quote(title)}&body={_quote(body)}"
         try:
             os.startfile(url)  # noqa: S606 - the browser opens the page
@@ -302,6 +308,47 @@ def _stamp() -> str:
     import datetime
 
     return datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def _shorten(report: str) -> str:
+    """Shortens the report so that it fits into the address of a browser.
+
+    The parts that say what went wrong are kept: the machine, the answer
+    of every driver and the devices that are finally shown. The long list
+    of the HID interfaces is the first thing to go, because it is the
+    least telling one.
+    """
+    if len(report) <= BODY_LIMIT:
+        return report
+
+    # The report is cut into its parts, so that the ones that matter can
+    # be kept and the rest can be left out.
+    parts = report.split("=" * 60)
+    # Every other part is a heading, the ones in between are its text.
+    titles = parts[1::2]
+    texts = parts[2::2]
+
+    kept: list[str] = []
+    for title, text in zip(titles, texts):
+        if "HID 子系统" in title:
+            # Only the number of the interfaces and the reason they are
+            # missing are worth keeping.
+            lines = [line for line in text.splitlines()
+                     if "接口数" in line or "报错" in line
+                     or "没有接口" in line]
+            kept.append(title + "\n" + "\n".join(lines))
+            continue
+        if "每个驱动" in title:
+            # The stack traces of a failed driver are long, but they say
+            # exactly why the driver failed.
+            kept.append(title + "\n" + text)
+            continue
+        kept.append(title + "\n" + text)
+
+    result = "=" * 60 + "=" * 60 + "".join(kept)
+    if len(result) > BODY_LIMIT:
+        result = result[:BODY_LIMIT]
+    return result
 
 
 def _quote(text: str) -> str:
