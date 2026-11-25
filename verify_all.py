@@ -4149,3 +4149,182 @@ def test_the_start_does_not_stand_inside_a_block():
     # The line of the start is not inside a block.
     assert not start_line[0].strip().startswith("(")
 
+
+def test_the_update_script_has_clean_line_endings():
+    """The script must not carry a doubled carriage return.
+
+    Writing text on Windows turns every line break into ``\\r\\n``, so a
+    script that already ends its lines with ``\\r\\n`` used to be written
+    with ``\\r\\r\\n``. The command interpreter puts up with that most of
+    the time, which is exactly the kind of thing that breaks on one
+    machine and not on the next.
+    """
+    from pathlib import Path
+
+    target = Path("C:/app/BatteryTray.exe")
+    source = Path("C:/app/BatteryTray.exe.new")
+    backup = Path("C:/app/BatteryTray.exe.old")
+    script = update._replace_script(target, source, backup, 4321)
+    launcher = Path(str(script).replace("replace.bat", "launch.bat"))
+    try:
+        script_raw = script.read_bytes()
+        launcher_raw = launcher.read_bytes()
+    finally:
+        script.unlink(missing_ok=True)
+        launcher.unlink(missing_ok=True)
+    assert b"\r\r\n" not in script_raw
+    assert b"\r\r\n" not in launcher_raw
+    assert b"\r\n" in script_raw
+
+
+def test_the_old_program_comes_back_when_the_swap_fails(tmp_path):
+    """A failed swap must not leave the user without the app.
+
+    The old copy is put aside first. When the new one cannot be moved
+    into its place, the old one has to come back: the shortcut, the
+    startup entry and the "open the folder" habit of the user all point
+    at that one file.
+    """
+    import subprocess
+    from pathlib import Path
+
+    target = tmp_path / "BatteryTray.exe"
+    target.write_bytes(b"MZ-old-program")
+    backup = tmp_path / "BatteryTray.exe.old"
+    # The new file never arrived, so the swap cannot work.
+    source = tmp_path / "BatteryTray.exe.new"
+
+    script = update._replace_script(target, source, backup, 999999)
+    subprocess.run(["cmd.exe", "/c", str(script)], cwd=str(tmp_path),
+                   capture_output=True, timeout=180)
+
+    assert target.exists(), "the old program has to be put back"
+    assert target.read_bytes() == b"MZ-old-program"
+
+
+def test_an_update_that_is_not_a_program_is_refused(tmp_path):
+    """A file that is not a program must never take the place of the app.
+
+    A release can arrive as an error page or wrapped in the enclosure of
+    an upload (that happened to 1.3.1). Putting such a file in place of
+    the running copy would leave the user with an app that cannot start.
+    """
+    from pathlib import Path
+
+    target = tmp_path / "BatteryTray.exe"
+    target.write_bytes(b"MZ" + bytes(64))
+    source = tmp_path / "BatteryTray.exe.new"
+    source.write_text("<!DOCTYPE html><html>404</html>", encoding="utf-8")
+
+    with pytest.raises(update.UpdateError):
+        update.apply_update(source, target)
+
+    assert target.read_bytes() == b"MZ" + bytes(64), \
+        "the running copy has to stay untouched"
+
+
+def test_the_installer_carries_the_version_of_the_app():
+    """The installer and the build script have to name the same version.
+
+    The version of a release lives in three places: the app, the build
+    script that names the files and the installer that shows it in its
+    window. They drifted apart before (the 1.3.4 installer still said
+    1.3.3), and a release that names itself wrongly is hard to tell
+    apart from an old one.
+    """
+    import re
+    from pathlib import Path
+
+    from batterytray import __version__
+
+    root = Path(__file__).resolve().parent
+    places = {
+        "installer/payload.py": r'APP_VERSION = "([^"]+)"',
+        "build_installer.py": r'^VERSION = "([^"]+)"',
+    }
+    for name, pattern in places.items():
+        text = (root / name).read_text(encoding="utf-8")
+        match = re.search(pattern, text, re.MULTILINE)
+        assert match, f"{name} has to name a version"
+        assert match.group(1) == __version__, \
+            f"{name} says {match.group(1)} but the app is {__version__}"
+
+
+def test_the_progress_of_an_update_is_drawn_by_the_tkinter_thread(
+        gui_window, monkeypatch, tmp_path):
+    """The update must not touch tkinter from the download thread.
+
+    The progress bar used to be drawn straight from the download thread.
+    Tkinter is not thread safe, and Windows logged an APPCRASH in
+    python313.dll while the app was downloading an update: the app was
+    gone all at once and never came back, which looks exactly like the
+    update having broken it. Every callback of the update therefore has
+    to be handed to the tkinter thread.
+    """
+    pytest.importorskip("tkinter")
+    from pathlib import Path
+
+    from batterytray.app import TrayApp
+
+    target = tmp_path / "BatteryTray.exe"
+    target.write_bytes(b"MZ" + bytes(64))
+    monkeypatch.setattr(update, "running_executable", lambda: target)
+    monkeypatch.setattr(update, "apply_update",
+                        lambda source, target=None: True)
+
+    main = threading.current_thread()
+    seen = []
+    downloaded = threading.Event()
+
+    class Release:
+        """The part of a release the download uses."""
+
+        update_url = "https://example.invalid/BatteryTray.exe"
+
+    def fake_download(url, path, progress=None, on_retry=None, **kwargs):
+        """Calls the callbacks the way the real download does."""
+        def call_back():
+            progress(1024, 4096)
+            on_retry(1, "连接断了")
+            progress(4096, 4096)
+
+        worker = threading.Thread(target=call_back)
+        worker.start()
+        worker.join()
+        Path(path).write_bytes(b"MZ" + bytes(64))
+        downloaded.set()
+        return Path(path)
+
+    monkeypatch.setattr(update, "download_file", fake_download)
+
+    app = TrayApp(config=Config())
+    app._window = gui_window
+    monkeypatch.setattr(app, "_quit_after_update", lambda *a, **k: None)
+
+    def on_progress(read, total):
+        seen.append(("progress", read, total,
+                     threading.current_thread() is main))
+
+    def on_retry(attempt, reason):
+        seen.append(("retry", attempt, reason,
+                     threading.current_thread() is main))
+
+    def on_done():
+        seen.append(("done", threading.current_thread() is main))
+
+    app.download_update_async(Release(), on_progress=on_progress,
+                              on_done=on_done, on_error=on_done,
+                              on_retry=on_retry)
+
+    assert downloaded.wait(10), "the download has to finish"
+    time.sleep(0.2)
+    # Nothing may have been drawn from the download thread.
+    assert seen == [], "the update dialog must not run in the download thread"
+    # The window runs the queued calls on its own thread.
+    gui_window._drain_pending()
+    assert [item[0] for item in seen] == ["progress", "retry",
+                                          "progress", "done"]
+    assert all(item[-1] for item in seen), \
+        "every callback has to run on the tkinter thread"
+    assert seen[1][1:3] == (1, "连接断了")
+

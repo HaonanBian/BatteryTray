@@ -735,7 +735,25 @@ class TrayApp:
 
         The download runs in a thread, because it has to wait for the
         server. The app is closed once the new file is in place.
+
+        The progress is handed to the window instead of being reported
+        from the download thread: those callbacks draw the progress bar,
+        and tkinter may only be touched from the thread that owns it.
+        Drawing from the download thread crashed the whole app with an
+        access violation (Windows logged an APPCRASH in python313.dll),
+        so the update stopped halfway and nothing started the app again
+        afterwards. That looked exactly like "the update broke it".
         """
+        def report_progress(read: int, total: int) -> None:
+            """Queues a progress update for the tkinter thread."""
+            if on_progress is not None:
+                self._post_to_window(on_progress, read, total)
+
+        def report_retry(attempt: int, reason: str) -> None:
+            """Queues the news about another download attempt."""
+            if on_retry is not None:
+                self._post_to_window(on_retry, attempt, reason)
+
         def worker():
             target = update.running_executable()
             if target is None:
@@ -747,8 +765,8 @@ class TrayApp:
             staged = folder / f"{target.name}.new"
             try:
                 update.download_file(release.update_url, staged,
-                                     progress=on_progress,
-                                     on_retry=on_retry)
+                                     progress=report_progress,
+                                     on_retry=report_retry)
                 update.apply_update(staged, target)
             except update.UpdateError as exc:
                 staged.unlink(missing_ok=True)

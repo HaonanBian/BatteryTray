@@ -383,6 +383,11 @@ def _replace_script(target: Path, source: Path, backup: Path,
     be gone before it touches the files, and it starts the new copy
     afterwards.
 
+    The old file is only put aside, never thrown away before the new one
+    is in its place: when the swap goes wrong the old copy is moved back,
+    because a user who cannot start the app has no way to fix that on
+    their own.
+
     The new copy is started through a small launcher of its own. A
     program that is started straight from the command interpreter is
     killed together with it, so it would never get a chance to run.
@@ -397,39 +402,51 @@ def _replace_script(target: Path, source: Path, backup: Path,
     # because a program that is started straight from the command
     # interpreter is killed together with it.
     launcher = folder / "launch.bat"
+    # The files are written as they are, without the extra carriage
+    # return that writing text on Windows would add: a line that ends in
+    # two of them confuses the command interpreter.
     launcher.write_text(
         "@echo off\r\n"
         f'start "" "{target}"\r\n',
-        encoding="mbcs", errors="replace")
+        encoding="mbcs", errors="replace", newline="")
     script.write_text(
         "@echo off\r\n"
         # Wait until the running copy is really gone. The loop gives up
-        # after a minute, so a stuck process does not block the update
-        # forever.
+        # after about a minute and a half, so a stuck process cannot
+        # block the update forever.
+        "set waited=0\r\n"
         ":wait\r\n"
         f'tasklist /nh /fo csv /fi "PID eq {pid}" > "{listing}"\r\n'
         f'findstr /c:"\\"{pid}\\"" "{listing}" > nul\r\n'
-        "if not errorlevel 1 (\r\n"
-        "  ping 127.0.0.1 -n 2 > nul\r\n"
-        "  goto wait\r\n"
-        ")\r\n"
+        "if errorlevel 1 goto gone\r\n"
+        "ping 127.0.0.1 -n 2 > nul\r\n"
+        "set /a waited=waited+1\r\n"
+        "if %waited% LSS 60 goto wait\r\n"
+        ":gone\r\n"
         f'del /q "{listing}" > nul 2>nul\r\n'
-        # Put the old file aside and move the new one into its place.
+        # Put the running copy aside. When that does not work, the old
+        # copy is left where it is: an app that still works is better
+        # than none.
         f'move /y "{target}" "{backup}" > nul 2>nul\r\n'
+        f'if exist "{target}" goto done\r\n'
+        # Move the new copy into its place.
         f'move /y "{source}" "{target}" > nul 2>nul\r\n'
-        # The new copy is only started when the swap worked. The start
-        # has to stand on its own, because it does not work inside a
-        # block of a batch file.
-        f'if not exist "{target}" goto done\r\n'
+        # Without the new file the old one has to come back, otherwise
+        # the user is left without the app.
+        f'if not exist "{target}" goto restore\r\n'
+        # The new copy is only started when the swap worked.
         f'start "" "{launcher}"\r\n'
         # The old file is kept for a while, in case the new one fails.
         "ping 127.0.0.1 -n 3 > nul\r\n"
         f'del /q "{backup}" > nul 2>nul\r\n'
+        "goto done\r\n"
+        ":restore\r\n"
+        f'move /y "{backup}" "{target}" > nul 2>nul\r\n'
         ":done\r\n"
         "del \"%~f0\"\r\n"
         "rmdir \"%~dp0\" 2>nul\r\n"
         "exit /b 0\r\n",
-        encoding="mbcs", errors="replace")
+        encoding="mbcs", errors="replace", newline="")
     return script
 
 
@@ -479,6 +496,14 @@ def apply_update(source: Path, target: Path | None = None) -> bool:
     target = Path(target)
     if not source.is_file():
         raise UpdateError("下载的文件不见了")
+
+    # The new file has to be a program. A download can deliver an error
+    # page or a wrapper around the file instead of the program itself
+    # (that is what happened to the 1.3.1 release), and a file like that
+    # cannot be started. It would take the place of the working copy and
+    # leave the user without any app at all, so it is refused here.
+    if not _looks_like_program(source):
+        raise UpdateError("下载的文件不是有效的程序文件，更新已取消")
 
     # The new file has to be written next to the running one. When the
     # program sits in a folder that only the administrator may write
