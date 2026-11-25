@@ -1465,6 +1465,95 @@ def test_a_sleeping_razer_mouse_has_no_battery_level():
     assert dict(device.detail_rows)["状态"] == "未连接"
 
 
+def test_a_failing_driver_does_not_take_the_others_down(monkeypatch):
+    """A driver that fails must not empty the whole device list.
+
+    On some machines the HID subsystem refuses to answer, for example
+    because the process may not open the HID devices. In an earlier
+    version that failure aborted the collection, so every device after the
+    failing driver disappeared and the user saw nothing at all.
+    """
+    calls: list[str] = []
+
+    def failing_razer():
+        calls.append("razer")
+        raise OSError("Access is denied.")
+
+    def working_bluetooth():
+        calls.append("bluetooth")
+        return []
+
+    monkeypatch.setattr("batterytray.app._read_razer", failing_razer)
+    monkeypatch.setattr("batterytray.app._read_bluetooth", working_bluetooth)
+
+    config = Config()
+    config.enabled_kinds = ["mouse", "headset", "controller", "keyboard"]
+    devices, failures = collect_devices(config)
+
+    # The driver after the failing one is still asked.
+    assert "bluetooth" in calls, "失败的驱动不能中断后面的驱动"
+    # And the reason is reported, so the user can see what went wrong.
+    assert any("razer" in failure for failure in failures), failures
+
+
+def test_the_hid_failure_is_reported(monkeypatch):
+    """The HID subsystem refuses to answer, the user has to learn why.
+
+    The HID drivers swallow the failure so that the other devices are
+    still shown. The reason is kept and reported, otherwise an empty
+    device list has no explanation at all.
+    """
+    def refuse(*args, **kwargs):
+        raise OSError("Access is denied.")
+
+    monkeypatch.setattr(hidsupport, "_failure_count", 0)
+    monkeypatch.setattr(hidsupport, "_last_error", "")
+    monkeypatch.setattr("hid.enumerate", refuse)
+
+    hidsupport.enumerate_interfaces()
+    assert hidsupport.failure_count() == 1
+    assert "Access is denied" in hidsupport.last_error()
+
+
+def test_the_bluetooth_stamp_is_read_as_local_time():
+    """The last connected stamp is stored in local time by Windows.
+
+    Windows keeps most of its time stamps in UTC, but the Bluetooth
+    connection stamp is written in local system time. Reading it as UTC
+    shifts it by the offset of the time zone, which in China is eight
+    hours. The driver has to correct for that.
+    """
+    stamp = datetime.datetime(2026, 11, 24, 15, 30, 0)
+    as_utc = bluetooth._local_stamp_to_utc(stamp)
+    offset = datetime.datetime.now().astimezone().utcoffset()
+    assert as_utc == stamp - offset
+    # The result is a plain UTC time, ready to be compared with now().
+    assert as_utc.tzinfo is None
+
+
+def test_the_bluetooth_stamp_is_used_for_reachability():
+    """A device that was seen recently has to be judged as reachable."""
+    now = datetime.datetime(2026, 11, 24, 12, 0, 0)
+    recent = now - datetime.timedelta(minutes=2)
+    old = now - datetime.timedelta(hours=2)
+
+    assert bluetooth._is_reachable(False, None, now, activity=recent)
+    assert not bluetooth._is_reachable(False, None, now, activity=old)
+
+
+def test_the_xbox_controller_is_found_through_xinput():
+    """A controller that XInput knows about has to be listed.
+
+    A controller that is plugged in with a cable or sits in the official
+    wireless adapter does not show up as a Bluetooth device, only as an
+    XInput one.
+    """
+    devices = xbox.read_devices()
+    for device in devices:
+        assert device.connected
+        assert device.percent is None or 1 <= device.percent <= 100
+
+
 def test_bluetooth_reads_a_headset():
     devices = bluetooth.read_devices()
     for device in devices:

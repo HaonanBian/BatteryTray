@@ -16,8 +16,8 @@ import pystray
 
 from . import autostart, singleton
 from .config import Config, config_dir
-from .drivers import (asusmouse, bluetooth, hidvendor, logitech, razer,
-                      vendor2, xbox)
+from .drivers import (asusmouse, bluetooth, hidvendor, hidsupport, logitech,
+                      razer, vendor2, xbox)
 from .icon import DeviceState, build_device_icon, build_icon
 from . import update
 from .update import UpdateError, check_for_update
@@ -146,6 +146,14 @@ def collect_devices(config: Config) -> tuple[list[Device], list[str]]:
                    for d in devices):
                 continue
             devices.append(device)
+
+    # The HID drivers swallow the failures of the HID subsystem on purpose,
+    # so that a machine that denies them still shows its other devices. The
+    # reason is picked up here and reported, because otherwise the user sees
+    # an empty list without any clue.
+    if hidsupport.failure_count() and not any(
+            failure.startswith("hid") for failure in failures):
+        failures.append(f"hid: {hidsupport.last_error()}")
 
     if config.devices:
         wanted = {name.lower() for name in config.devices}
