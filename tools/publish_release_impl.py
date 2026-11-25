@@ -25,8 +25,8 @@ RELEASE_DIR = ROOT / "release"
 
 OWNER = "HaonanBian"
 REPO = "BatteryTray"
-TAG = "v1.3.2"
-TITLE = "BatteryTray 1.3.2"
+TAG = "v1.3.3"
+TITLE = "BatteryTray 1.3.3"
 
 API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 
@@ -34,12 +34,12 @@ API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 # user: the installer first, then the portable archive and the single file
 # copy.
 ASSETS = [
-    "BatteryTray-Setup-1.3.2.exe",
-    "BatteryTray-1.3.2-portable.zip",
-    "BatteryTray-1.3.2.exe",
+    "BatteryTray-Setup-1.3.3.exe",
+    "BatteryTray-1.3.3-portable.zip",
+    "BatteryTray-1.3.3.exe",
 ]
 
-NOTES = "NOTES-1.3.2.md"
+NOTES = "NOTES-1.3.3.md"
 
 
 def request(method: str, url: str, token: str, data=None):
