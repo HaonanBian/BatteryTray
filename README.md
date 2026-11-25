@@ -8,10 +8,10 @@ Windows 托盘电量显示工具 —— 在系统托盘里查看**鼠标、键�
 
 | 版本 | 文件 | 说明 |
 |------|------|------|
-| **安装版（推荐）** | [`BatteryTray-Setup-1.3.7.exe`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.3.7/BatteryTray-Setup-1.3.7.exe) | 带安装向导，装完自带开始菜单快捷方式和卸载程序 |
-| **便携版** | [`BatteryTray-1.3.7-portable.zip`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.3.7/BatteryTray-1.3.7-portable.zip) | 解压即用，免安装 |
+| **安装版（推荐）** | [`BatteryTray-Setup-2.0.0.exe`](https://github.com/HaonanBian/BatteryTray/releases/download/v2.0.0/BatteryTray-Setup-2.0.0.exe) | 带安装向导，装完自带开始菜单快捷方式和卸载程序 |
+| **便携版** | [`BatteryTray-2.0.0-portable.zip`](https://github.com/HaonanBian/BatteryTray/releases/download/v2.0.0/BatteryTray-2.0.0-portable.zip) | 解压即用，免安装 |
 
-> 免安装用户也可以直接下载 [`BatteryTray-1.3.7.exe`](https://github.com/HaonanBian/BatteryTray/releases/download/v1.3.7/BatteryTray-1.3.7.exe)（单文件版，双击即运行）。
+> 免安装用户也可以直接下载 [`BatteryTray-2.0.0.exe`](https://github.com/HaonanBian/BatteryTray/releases/download/v2.0.0/BatteryTray-2.0.0.exe)（单文件版，双击即运行）。
 >
 > 想要**每个设备一根电量条**还是**只显示最危险的那个**，在设置里一键切换。
 >
