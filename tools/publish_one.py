@@ -24,7 +24,7 @@ RELEASE_DIR = ROOT / "release"
 
 OWNER = "HaonanBian"
 REPO = "BatteryTray"
-TAG = "v1.3.2"
+TAG = "v1.3.3"
 
 API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 

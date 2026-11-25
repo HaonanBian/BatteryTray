@@ -215,11 +215,41 @@ def main() -> None:
 
     archive = make_portable(app_exe)
 
+    clean_old_versions()
+
     print()
     print("打包完成：")
     print(f"  安装程序（单文件，可直接发送）  {setup}")
     print(f"  便携版                        {archive}")
     print(f"  单文件版                      {standalone}")
+
+
+def clean_old_versions() -> None:
+    """Removes the files of the versions that are no longer current.
+
+    The release folder is committed to the repository, so every build
+    would leave the files of the previous versions behind and the folder
+    would grow with every release. Only the files of the current version
+    are kept.
+    """
+    current = VERSION
+    patterns = [
+        f"{APP_NAME}-*-portable.zip",
+        f"{APP_NAME}-Setup-*.exe",
+        f"{APP_NAME}-*.exe",
+        f"NOTES-*.md",
+    ]
+    removed = []
+    for pattern in patterns:
+        for path in DIST.glob(pattern):
+            if current in path.name:
+                continue
+            path.unlink()
+            removed.append(path.name)
+    if removed:
+        print("==> 清理旧版本：")
+        for name in sorted(removed):
+            print(f"    {name}")
 
 
 if __name__ == "__main__":
