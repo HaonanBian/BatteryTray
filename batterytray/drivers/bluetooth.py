@@ -184,32 +184,71 @@ setupapi.SetupDiDestroyDeviceInfoList.argtypes = [wt.HANDLE]
 # the one that the radio uses is found by looking at what it answers.
 
 class _RADIO_PARAMS(ctypes.Structure):
+    """``BLUETOOTH_DEVICE_SEARCH_PARAMS``.
+
+    The layout has to match the one of Windows exactly: the call checks
+    ``dwSize`` and refuses to answer when it is wrong. The BOOL fields are
+    four bytes wide, and ``hRadio`` is a handle, which is wider than a
+    DWORD on a 64 bit system.
+    """
+
     _fields_ = [
         ("dwSize", wt.DWORD),
-        ("fReturnAuthorization", ctypes.c_ubyte),
-        ("fReturnAuthenticated", ctypes.c_ubyte),
-        ("fReturnRemembered", ctypes.c_ubyte),
-        ("fReturnConnected", ctypes.c_ubyte),
-        ("fReturnUnknown", ctypes.c_ubyte),
-        ("hRadio", wt.DWORD),
+        ("fReturnAuthenticated", wt.BOOL),
+        ("fReturnRemembered", wt.BOOL),
+        ("fReturnUnknown", wt.BOOL),
+        ("fReturnConnected", wt.BOOL),
+        ("fIssueInquiry", wt.BOOL),
+        ("cTimeoutMultiplier", ctypes.c_ubyte),
+        ("hRadio", wt.HANDLE),
+    ]
+
+
+class _SYSTEMTIME(ctypes.Structure):
+    """``SYSTEMTIME``."""
+
+    _fields_ = [
+        ("wYear", wt.WORD),
+        ("wMonth", wt.WORD),
+        ("wDayOfWeek", wt.WORD),
+        ("wDay", wt.WORD),
+        ("wHour", wt.WORD),
+        ("wMinute", wt.WORD),
+        ("wSecond", wt.WORD),
+        ("wMilliseconds", wt.WORD),
+    ]
+
+
+class _BLUETOOTH_ADDRESS(ctypes.Union):
+    """``BLUETOOTH_ADDRESS``: the six bytes of the address as one number."""
+
+    _fields_ = [
+        ("ullLong", ctypes.c_ulonglong),
+        ("rgBytes", ctypes.c_ubyte * 6),
     ]
 
 
 class _RADIO_DEVICE_INFO(ctypes.Structure):
-    # The name of the device is 116 characters long, not the 248 that the
-    # documentation of the older structure suggests. Windows checks the
-    # size of the structure and refuses the call when it does not match,
-    # so the field is padded to make the structure exactly 288 bytes.
+    """``BLUETOOTH_DEVICE_INFO``.
+
+    The two stamps are ``SYSTEMTIME`` values and not file times, and the
+    name holds 248 characters. The size of the structure is checked by
+    Windows as well, so a structure that is too small gets no answer at
+    all -- which is what happened here: the radio was asked in a shape it
+    does not know, refused every time, and the app quietly believed that
+    no device was connected.
+    """
+
     _fields_ = [
         ("dwSize", wt.DWORD),
-        ("Address", wt.DWORD),
+        ("Address", _BLUETOOTH_ADDRESS),
         ("ulClassofDevice", wt.DWORD),
         ("fConnected", wt.BOOL),
         ("fRemembered", wt.BOOL),
         ("fAuthenticated", wt.BOOL),
-        ("stLastSeen", wt.FILETIME),
-        ("stLastUsed", wt.FILETIME),
-        ("szName", ctypes.c_wchar * 124),
+        ("stLastSeen", _SYSTEMTIME),
+        ("stLastUsed", _SYSTEMTIME),
+        ("szName", ctypes.c_wchar * 248),
     ]
 
 
@@ -255,39 +294,53 @@ def _radio_connected_addresses() -> dict[int, tuple[bool, str]]:
 
     dll.BluetoothFindFirstDevice.argtypes = [
         ctypes.POINTER(_RADIO_PARAMS), ctypes.POINTER(_RADIO_DEVICE_INFO)]
-    dll.BluetoothFindFirstDevice.restype = wt.BOOL
+    dll.BluetoothFindFirstDevice.restype = wt.HANDLE
     dll.BluetoothFindNextDevice.argtypes = [
-        ctypes.POINTER(_RADIO_PARAMS), ctypes.POINTER(_RADIO_DEVICE_INFO)]
+        wt.HANDLE, ctypes.POINTER(_RADIO_DEVICE_INFO)]
     dll.BluetoothFindNextDevice.restype = wt.BOOL
+    dll.BluetoothFindDeviceClose.argtypes = [wt.HANDLE]
+    dll.BluetoothFindDeviceClose.restype = wt.BOOL
 
     params = _RADIO_PARAMS()
     params.dwSize = ctypes.sizeof(_RADIO_PARAMS)
     # Every kind of device is asked for, so that a device that is
     # remembered but not connected can be told apart from one that is
     # gone altogether.
-    params.fReturnAuthorization = 1
     params.fReturnAuthenticated = 1
     params.fReturnRemembered = 1
     params.fReturnConnected = 1
     params.fReturnUnknown = 1
+    # An inquiry makes the radio look for new devices and takes seconds.
+    # The devices that matter are already known to the stack.
+    params.fIssueInquiry = 0
+    params.cTimeoutMultiplier = 0
+    params.hRadio = None
 
     info = _RADIO_DEVICE_INFO()
     info.dwSize = ctypes.sizeof(_RADIO_DEVICE_INFO)
 
     result: dict[int, tuple[bool, str]] = {}
     try:
-        if not dll.BluetoothFindFirstDevice(ctypes.byref(params),
-                                            ctypes.byref(info)):
-            return {}
+        find = dll.BluetoothFindFirstDevice(ctypes.byref(params),
+                                            ctypes.byref(info))
+    except OSError:
+        return {}
+    if not find:
+        return {}
+    try:
         while True:
-            result[info.Address & 0xFFFFFFFF] = (bool(info.fConnected),
-                                                  info.szName)
+            # The radio hands out a search handle that has to be closed
+            # again; leaving it open keeps the radio from answering the
+            # next time.
+            result[int(info.Address.ullLong) & 0xFFFFFFFF] = (
+                bool(info.fConnected), "".join(info.szName))
             info.dwSize = ctypes.sizeof(_RADIO_DEVICE_INFO)
-            if not dll.BluetoothFindNextDevice(ctypes.byref(params),
-                                               ctypes.byref(info)):
+            if not dll.BluetoothFindNextDevice(find, ctypes.byref(info)):
                 break
     except OSError:
         return {}
+    finally:
+        dll.BluetoothFindDeviceClose(find)
     return result
 
 
@@ -308,6 +361,12 @@ class BluetoothDevice:
     last_report: datetime.datetime | None = None
     # When the peripheral was last seen, if Windows recorded it.
     last_seen: datetime.datetime | None = None
+    # The stamps of the registry record of the device. They are older than
+    # the ones of the device node: ``last_connected`` only changes when the
+    # link is set up, so a headset that stays connected for hours keeps an
+    # hours old stamp there.
+    registry_seen: datetime.datetime | None = None
+    registry_connected: datetime.datetime | None = None
 
 
 def _friendly_name(dev_info: wt.HANDLE, info: SP_DEVINFO_DATA) -> str:
@@ -657,41 +716,26 @@ def read_devices() -> list[BluetoothDevice]:
             registry_seen = _registry_last_seen(record)
             registry_connected = _registry_last_connected(record)
 
-            # The freshest of the activity stamps is the one that counts.
-            activity = _newest(last_seen, registry_connected)
-
             if radio_state is not None:
                 # The radio answered for this device, so it decides.
                 reachable = radio_state
             else:
-                reachable = _is_reachable(connected, registry_seen, now,
-                                          last_report=last_report,
-                                          activity=activity)
+                reachable = _decide_connection(connected, last_report,
+                                               last_seen, registry_seen,
+                                               registry_connected, now)
 
             found[key] = BluetoothDevice(
                 name=name, address=address, percent=min(100, level),
                 kind=_classify(name, _kind_from_class_of_device(record)),
                 connected=reachable,
                 last_report=last_report,
-                last_seen=last_seen)
+                last_seen=last_seen,
+                registry_seen=registry_seen,
+                registry_connected=registry_connected)
     finally:
         setupapi.SetupDiDestroyDeviceInfoList(dev_info)
 
     return sorted(found.values(), key=lambda d: d.name)
-
-
-def _newest(first: datetime.datetime | None,
-            second: datetime.datetime | None) -> datetime.datetime | None:
-    """Returns the later of two time stamps.
-
-    ``None`` means that the stamp is not known, so it never wins over a
-    stamp that is known.
-    """
-    if first is None:
-        return second
-    if second is None:
-        return first
-    return max(first, second)
 
 
 def _plain_address(address: str) -> str:
@@ -706,7 +750,8 @@ def _plain_address(address: str) -> str:
 def _is_reachable(connected: bool | None, last_seen: datetime.datetime | None,
                   now: datetime.datetime,
                   last_report: datetime.datetime | None = None,
-                  activity: datetime.datetime | None = None) -> bool:
+                  activity: datetime.datetime | None = None,
+                  hint: datetime.datetime | None = None) -> bool:
     """Decides whether a device is really reachable right now.
 
     Windows offers several stamps for this, and none of them is
@@ -732,12 +777,23 @@ def _is_reachable(connected: bool | None, last_seen: datetime.datetime | None,
     generous timeout, because a gamepad that is switched on but idle
     reports its level rarely. Only when every stamp says the device is
     stale is it treated as gone.
+
+    ``hint`` is a stamp that may be fresh while the device is there, but
+    may also be old while it is there as well: the "last connected" stamp
+    of the registry only changes when the link is set up. It can therefore
+    only prove that a device is around, never that it is gone.
     """
     # The flag is the only source that can say "connected" outright. It
     # is used as such, but never as the only reason to call a device
     # gone.
     if connected is True:
         return True
+
+    # A fresh hint is proof enough. An old one says nothing.
+    if hint is not None:
+        age = (now - hint).total_seconds()
+        if age <= DEVICE_ACTIVITY_TIMEOUT_SECONDS:
+            return True
 
     # The activity stamp follows the device closely, so it decides on
     # its own. When it says the device is stale, the device is stale.
@@ -759,6 +815,27 @@ def _is_reachable(connected: bool | None, last_seen: datetime.datetime | None,
     # Nothing is known at all. Without proof the device is assumed to be
     # there, so a live reading is never hidden.
     return True
+
+
+def _decide_connection(connected: bool | None,
+                       last_report: datetime.datetime | None,
+                       node_activity: datetime.datetime | None,
+                       registry_seen: datetime.datetime | None,
+                       registry_connected: datetime.datetime | None,
+                       now: datetime.datetime) -> bool:
+    """Decides whether a device is reachable, from every stamp there is.
+
+    Only the activity stamp of the device node is used as the stamp that
+    follows the device. The "last connected" stamp of the registry is a
+    hint at best: it does not change while a device stays connected, so a
+    headset that has been connected for hours keeps an hours old stamp
+    there. Treating it like activity hid every headset whose link was set
+    up long ago, even though its battery level was reported minutes ago.
+    """
+    return _is_reachable(connected, registry_seen, now,
+                         last_report=last_report,
+                         activity=node_activity,
+                         hint=registry_connected)
 def read_headsets() -> list[BluetoothDevice]:
     """Returns only the headset-like devices."""
     return [d for d in read_devices() if is_headset_like(d.name, d.kind)]

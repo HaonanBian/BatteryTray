@@ -690,6 +690,187 @@ def test_the_asus_mouse_is_recognised_by_its_name():
     assert not mouseadapter.is_asus_device("Razer Viper V3 Pro")
 
 
+def test_a_hid_interface_is_opened_with_the_bytes_of_its_path():
+    """The HID library wants the path as bytes, not as text.
+
+    The drivers turn the path of an interface into text for their own
+    bookkeeping. Handing that text back to the library does not raise an
+    OSError but a TypeError ("expected bytes, got str"), and no driver
+    catches that: the whole driver stops working, so a connected mouse
+    reports nothing at all. That is what happened to the ASUS mouse.
+    """
+    class FakeHandle:
+        """Refuses text, the way the native call does."""
+
+        def __init__(self):
+            self.opened = []
+
+        def open_path(self, path):
+            if isinstance(path, str):
+                raise TypeError("Argument 'path' has incorrect type "
+                                "(expected bytes, got str)")
+            self.opened.append(path)
+
+    path = b"\\\\?\\hid#vid_0b05&pid_1a68&mi_00#7&2b0e9a1&0&0000"
+    handle = FakeHandle()
+    hidsupport.open_interface(handle, path)
+    assert handle.opened == [path]
+
+    # A path that was decoded on the way is turned back into bytes.
+    handle = FakeHandle()
+    hidsupport.open_interface(handle, path.decode("utf-8"))
+    assert handle.opened == [path]
+
+
+def test_the_asus_mouse_is_read_with_the_path_the_system_gave(monkeypatch):
+    """A connected ROG mouse has to be read, not skipped.
+
+    The diagnostic report of a machine with a ROG Keris in 2.4 GHz mode
+    ended with "asus: Argument 'path' has incorrect type (expected bytes,
+    got str)": the mouse was listed by the HID subsystem and then never
+    asked for its level.
+    """
+    path = b"\\\\?\\hid#vid_0b05&pid_1a68&mi_00#7&2b0e9a1&0&0000"
+    interface = {
+        "vendor_id": asusmouse.ASUS_VID,
+        "product_id": asusmouse.PRODUCT_WIRELESS,
+        "product_string": "ROG KERIS WIRELESS AIMPOINT",
+        "path": path,
+        "usage_page": asusmouse.USAGE_PAGE_VENDOR,
+        "usage": 1,
+    }
+    opened = []
+
+    class FakeController:
+        """Stands in for the real controller."""
+
+        def __init__(self, given, product_id, name, report_id=0):
+            opened.append(given)
+            self.name = name
+
+        def get_battery(self):
+            return 85, False
+
+        def get_polling_rate(self):
+            return 1000
+
+        def get_dpi_stages(self):
+            return []
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(asusmouse, "_candidate_interfaces",
+                        lambda: [interface])
+    monkeypatch.setattr(asusmouse, "AsusMouseController", FakeController)
+
+    found = asusmouse.read_devices()
+
+    assert opened and opened[0] == path, \
+        "the path has to go back to the HID library as bytes"
+    assert found and found[0].percent == 85
+
+
+def test_the_logitech_device_is_read_with_the_path_the_system_gave(
+        monkeypatch):
+    """The Logitech driver had the same mistake in it."""
+    path = b"\\\\?\\hid#vid_046d&pid_c548&mi_02#8&2f0e6a3&0&0000"
+    interface = {
+        "vendor_id": logitech.LOGITECH_VID,
+        "product_id": 0xC548,
+        "product_string": "MX Master 3S",
+        "path": path,
+        "usage_page": logitech.HIDPP_USAGE_PAGE,
+        "usage": 1,
+        "interface_number": 2,
+    }
+    opened = []
+
+    class FakeHandle:
+        """Refuses text, the way the native call does."""
+
+        def open_path(self, given):
+            if isinstance(given, str):
+                raise TypeError("Argument 'path' has incorrect type "
+                                "(expected bytes, got str)")
+            opened.append(given)
+
+        def close(self):
+            pass
+
+    class FakeHid:
+        """Hands out the fake handle instead of a real device."""
+
+        @staticmethod
+        def device():
+            return FakeHandle()
+
+    monkeypatch.setattr(logitech, "_interfaces", lambda: [interface])
+    monkeypatch.setattr(logitech, "hid", FakeHid)
+    monkeypatch.setattr(logitech.LogitechHidpp, "battery",
+                        lambda self: (60, False))
+    monkeypatch.setattr(logitech.LogitechHidpp, "device_name",
+                        lambda self: "MX Master 3S")
+
+    found = logitech.read_devices()
+
+    assert opened and opened[0] == path
+    assert any(device.percent == 60 for device in found)
+
+
+def test_the_vendor_driver_reads_with_the_path_the_system_gave(monkeypatch):
+    """The driver of the other vendors handed text to the library as well."""
+    path = b"\\\\?\\hid#vid_046d&pid_c547&mi_01#8&1c5b4e8&0&0000"
+    interface = {
+        "vendor_id": 0x046D,
+        "product_id": 0xC547,
+        "usage_page": 0xFF00,
+        "usage": 0x0001,
+        "product_string": "G PRO X 2",
+        "path": path,
+        "interface_number": 1,
+    }
+    opened = []
+
+    class FakeProtocol:
+        """The little the driver needs to know about a protocol."""
+
+        name = "测试协议"
+        connection = "USB"
+
+    class FakeHandle:
+        """Refuses text, the way the native call does."""
+
+        def open_path(self, given):
+            if isinstance(given, str):
+                raise TypeError("Argument 'path' has incorrect type "
+                                "(expected bytes, got str)")
+            opened.append(given)
+
+        def close(self):
+            pass
+
+    class FakeHid:
+        """Hands out the fake handle instead of a real device."""
+
+        @staticmethod
+        def device():
+            return FakeHandle()
+
+    monkeypatch.setattr(hidvendor, "_candidate_interfaces",
+                        lambda: [(interface, FakeProtocol())])
+    monkeypatch.setattr(hidvendor, "hid", FakeHid)
+    monkeypatch.setattr(hidvendor, "read_vxe_keyboards", lambda: [])
+    monkeypatch.setattr(hidvendor, "_query", lambda handle, protocol: b"")
+    monkeypatch.setattr(hidvendor, "_parse",
+                        lambda protocol, answer: (55, True))
+
+    found = hidvendor.read_devices()
+
+    assert opened == [path]
+    assert found and found[0].percent == 55
+
+
 def test_every_option_has_a_kind():
     """Every option the dropdown offers says what to do with it."""
     for options in (mouseadapter._razer_options(),
@@ -1620,6 +1801,37 @@ def test_the_report_survives_a_failing_driver(monkeypatch):
     assert "蓝牙栈" in report
 
 
+def test_the_report_says_which_collection_a_receiver_has(monkeypatch):
+    """A dongle has to be described well enough to be acted on.
+
+    The report of a machine whose 2.4 GHz dongle was not supported said
+    "Dongle 2.4G" and nothing else. Without the usage page and the
+    collection there is no way to tell which protocol the dongle speaks,
+    and a fix cannot be written from the report.
+    """
+    from batterytray import diagnostics
+
+    interfaces = [{
+        "vendor_id": 0x4C4A,
+        "product_id": 0x9002,
+        "product_string": "Dongle 2.4G",
+        "usage_page": 0xFF02,
+        "usage": 0x0001,
+        "interface_number": 2,
+        "path": b"\\\\?\\hid#vid_4c4a&pid_9002&mi_02&col03#7&1f2e3d4&0&0000",
+    }]
+    monkeypatch.setattr(hidsupport, "enumerate_interfaces",
+                        lambda vendor_id=None: interfaces)
+
+    text = "\n".join(diagnostics._hid_lines())
+
+    assert "pid=0x9002" in text
+    assert "usage_page=0xFF02" in text
+    assert "usage=0x0001" in text
+    # The collection is the part that tells the interfaces apart.
+    assert "mi_02&col03" in text
+
+
 def test_the_report_says_which_driver_failed():
     """The failures of the drivers have to be in the report."""
     from batterytray import diagnostics
@@ -1803,6 +2015,75 @@ def test_the_activity_stamp_decides_over_the_battery_report():
                                    activity=active) is True
 
 
+def test_a_headset_whose_link_was_set_up_long_ago_is_shown():
+    """A headset that is in use must not be hidden.
+
+    The report of a machine with a connected headset said "电量=100
+    连接=False", and the only fresh stamp it had was a battery report from
+    seven minutes before. The registry's "last connected" stamp was hours
+    old, because it only changes when the link is set up, and it was used
+    as if it were an activity stamp: every headset looked gone.
+    """
+    now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+    reachable = bluetooth._decide_connection(
+        False,
+        now - datetime.timedelta(minutes=7),   # battery report
+        None,                                  # no activity stamp
+        None,                                  # registry: last seen
+        now - datetime.timedelta(hours=8),     # registry: last connected
+        now)
+    assert reachable is True
+
+
+def test_a_device_that_has_been_quiet_for_days_stays_hidden():
+    """The same evidence, but days old, means the device is off."""
+    now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+    reachable = bluetooth._decide_connection(
+        False,
+        now - datetime.timedelta(days=4),
+        None,
+        None,
+        now - datetime.timedelta(days=4),
+        now)
+    assert reachable is False
+
+
+def test_a_fresh_link_setup_proves_that_the_device_is_there():
+    """A "last connected" stamp that is minutes old is proof enough."""
+    now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+    reachable = bluetooth._decide_connection(
+        False, None, None, None,
+        now - datetime.timedelta(minutes=2), now)
+    assert reachable is True
+
+
+def test_the_report_shows_every_stamp_of_a_bluetooth_device(monkeypatch):
+    """The report has to say why a device counts as connected."""
+    from batterytray import diagnostics
+
+    now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+    device = bluetooth.BluetoothDevice(
+        name="HUAWEI FreeClip Hands-Free AG",
+        address="AA:BB:CC:DD:EE:FF",
+        percent=100,
+        kind="headset",
+        connected=True,
+        last_report=now - datetime.timedelta(minutes=7),
+        registry_seen=now - datetime.timedelta(hours=9),
+        registry_connected=now - datetime.timedelta(hours=8),
+    )
+
+    monkeypatch.setattr(diagnostics.bluetooth, "read_devices",
+                        lambda: [device])
+    text = "\n".join(diagnostics._bluetooth_lines())
+
+    assert "电池上报" in text
+    assert "注册表连接" in text
+    assert "注册表见过" in text
+    # The stamps are shown in the local time of the machine.
+    assert diagnostics._local_time(device.last_report) in text
+
+
 def test_the_activity_stamp_is_the_local_time_of_the_machine():
     """The stamp of the device node is written in local time.
 
@@ -1818,6 +2099,33 @@ def test_the_activity_stamp_is_the_local_time_of_the_machine():
     assert converted == expected
     # The two must not be hours apart, which is what went wrong before.
     assert abs((converted - expected).total_seconds()) < 1
+
+
+def test_the_radio_structs_match_the_documented_api():
+    """The radio checks the shape of what it is asked with.
+
+    The structures used to be built from memory: one byte wide BOOL
+    fields, a DWORD wide handle, a four byte address and a name of 124
+    characters. Windows compares ``dwSize`` with the size it knows and
+    refuses the call when it does not match, so the radio answered
+    "nothing" on every machine and no device was ever seen as connected
+    by it.
+    """
+    import ctypes
+
+    # 4 + 5 * 4 + 1 + padding + 8 for the handle on a 64 bit system.
+    assert ctypes.sizeof(bluetooth._RADIO_PARAMS) == 40
+    assert bluetooth._RADIO_PARAMS.hRadio.offset == 32
+
+    info = bluetooth._RADIO_DEVICE_INFO
+    assert ctypes.sizeof(info) == 560
+    # dwSize, the eight byte address, the class of device, three BOOLs,
+    # two SYSTEMTIME values and 248 characters.
+    assert info.Address.offset == 8
+    assert ctypes.sizeof(bluetooth._BLUETOOTH_ADDRESS) == 8
+    assert info.fConnected.offset == 20
+    assert info.stLastSeen.offset == 32
+    assert info.szName.offset == 64
 
 
 def test_the_radio_reports_the_devices_it_sees():
@@ -2139,7 +2447,10 @@ def test_stop_ends_the_loop():
     time.sleep(0.5)
     app._stop.set()
     app._wake.set()
-    thread.join(timeout=5)
+    # The loop can only end once the poll that is already running is
+    # done, and that poll talks to the devices of the machine. The
+    # assertion is that the loop ends, not how fast the hardware is.
+    thread.join(timeout=20)
     assert not thread.is_alive()
 
 

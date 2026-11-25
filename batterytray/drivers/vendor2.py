@@ -1187,7 +1187,7 @@ def _asus_omni_name(dev: dict) -> str | None:
             continue
         try:
             handle = hid.device()
-            handle.open_path(candidate.get("path", b""))
+            hidsupport.open_interface(handle, candidate.get("path", b""))
         except OSError:
             continue
         try:
@@ -1511,10 +1511,9 @@ def read_devices() -> list[VendorDevice]:
     seen_names: set[str] = set()
 
     for dev, protocol in _candidate_interfaces():
-        path = dev.get("path", "")
         try:
             handle = hid.device()
-            handle.open_path(path)
+            hidsupport.open_interface(handle, dev.get("path", b""))
         except OSError:
             continue
 

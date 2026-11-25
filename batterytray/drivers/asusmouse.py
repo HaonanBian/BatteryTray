@@ -277,7 +277,7 @@ class AsusMouseController:
         self._handle: hid.device | None = None
         try:
             handle = hid.device()
-            handle.open_path(path)
+            hidsupport.open_interface(handle, path)
         except OSError as exc:
             raise AsusMouseError(f"无法打开鼠标：{exc}") from exc
         self._handle = handle
@@ -785,18 +785,17 @@ def read_devices() -> list[AsusDevice]:
 
     for dev in _candidate_interfaces():
         product_id = dev["product_id"]
-        path = dev["path"]
-        if isinstance(path, bytes):
-            path = path.decode("utf-8", errors="replace")
-
-        key = (product_id, path)
+        # The path is kept as the system gave it: the HID library wants
+        # bytes, and only the readable copy is decoded.
+        raw_path = dev.get("path", b"")
+        key = (product_id, _path_text(raw_path))
         if key in seen:
             continue
         seen.add(key)
 
         try:
             controller = AsusMouseController(
-                path, product_id,
+                raw_path, product_id,
                 _device_name(product_id, dev.get("product_string") or ""),
                 _report_id_for(product_id))
         except AsusMouseError:
@@ -857,13 +856,10 @@ def open_mouse(product_id: int | None = None) -> AsusMouseController | None:
         pid = dev["product_id"]
         if product_id is not None and pid != product_id:
             continue
-        path = dev["path"]
-        if isinstance(path, bytes):
-            path = path.decode("utf-8", errors="replace")
 
         try:
             controller = AsusMouseController(
-                path, pid,
+                dev.get("path", b""), pid,
                 _device_name(pid, dev.get("product_string") or ""),
                 _report_id_for(pid))
         except AsusMouseError as exc:

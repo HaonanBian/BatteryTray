@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime
 import platform
+import re
 import sys
 import traceback
 
@@ -58,7 +59,13 @@ def _driver_lines() -> list[str]:
 
 
 def _hid_lines() -> list[str]:
-    """Shows what the HID subsystem answers."""
+    """Shows what the HID subsystem answers.
+
+    The usage page, the usage and the collection of an interface are what
+    tell a 2.4 GHz dongle apart from the device behind it. A report that
+    only says "Dongle 2.4G" cannot be acted on: there is no way to tell
+    which protocol the dongle speaks.
+    """
     lines: list[str] = []
     before = hidsupport.failure_count()
     devices = hidsupport.enumerate_interfaces()
@@ -68,11 +75,46 @@ def _hid_lines() -> list[str]:
                      "或者没有接任何 HID 设备）")
     if hidsupport.failure_count() > before:
         lines.append(f"      HID 子系统报错: {hidsupport.last_error()}")
-    for device in devices[:20]:
-        lines.append(f"      vid=0x{device.get('vendor_id', 0):04X} "
-                     f"pid=0x{device.get('product_id', 0):04X} "
-                     f"{device.get('product_string')!r}")
+    for device in devices:
+        lines.append(
+            f"      vid=0x{device.get('vendor_id', 0):04X} "
+            f"pid=0x{device.get('product_id', 0):04X} "
+            f"usage_page=0x{device.get('usage_page', 0):04X} "
+            f"usage=0x{device.get('usage', 0):04X} "
+            f"{device.get('product_string')!r}")
+        collection = _collection_text(device.get("path", ""))
+        if collection:
+            lines.append(f"          接口={collection}")
     return lines
+
+
+# The part of a HID path that names the interface and the collection.
+_COLLECTION = re.compile(r"mi_\d+(?:&col\d+)?", re.IGNORECASE)
+
+
+def _collection_text(path: bytes | str) -> str:
+    """The interface and collection a HID path points at, e.g. ``mi_02&col03``.
+
+    A receiver with two collections looks the same in the vendor and
+    product id; only this part tells which one carries the answers.
+    """
+    if isinstance(path, bytes):
+        path = path.decode("utf-8", errors="replace")
+    match = _COLLECTION.search(path)
+    return match.group(0) if match else ""
+
+
+def _local_time(stamp: datetime.datetime | None) -> str:
+    """Shows a stamp in the local time of the machine.
+
+    The Bluetooth stamps are read in UTC, which is right for comparing
+    them but unreadable in a report: a report taken at nine in the
+    evening showed "13:18" and looked hours old.
+    """
+    if stamp is None:
+        return ""
+    return stamp.replace(tzinfo=datetime.UTC).astimezone().strftime(
+        "%Y-%m-%d %H:%M:%S")
 
 
 def _bluetooth_lines() -> list[str]:
@@ -103,9 +145,17 @@ def _bluetooth_lines() -> list[str]:
         lines.append(f"          类型={device.kind} "
                      f"电量={device.percent} 连接={device.connected}")
         if device.last_report:
-            lines.append(f"          电池上报={device.last_report}")
+            lines.append(f"          电池上报={_local_time(device.last_report)}")
         if device.last_seen:
-            lines.append(f"          最后活动={device.last_seen}")
+            lines.append(f"          最后活动={_local_time(device.last_seen)}")
+        # The stamps of the registry only change when the link is set up,
+        # so they are shown as evidence and not as the truth.
+        if device.registry_connected:
+            lines.append(f"          注册表连接="
+                         f"{_local_time(device.registry_connected)}")
+        if device.registry_seen:
+            lines.append(f"          注册表见过="
+                         f"{_local_time(device.registry_seen)}")
     return lines
 
 

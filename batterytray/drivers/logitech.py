@@ -147,7 +147,7 @@ class LogitechHidpp:
         self._handle: hid.device | None = None
         try:
             handle = hid.device()
-            handle.open_path(path)
+            hidsupport.open_interface(handle, path)
         except OSError as exc:
             raise LogitechError(f"无法打开罗技设备：{exc}") from exc
         self._handle = handle
@@ -326,9 +326,12 @@ def read_devices() -> list[LogitechDevice]:
     for dev in _interfaces():
         product_id = dev.get("product_id", 0)
         product_string = dev.get("product_string") or ""
-        path = dev["path"]
-        if isinstance(path, bytes):
-            path = path.decode("utf-8", errors="replace")
+        # The path is kept as the system gave it, because the HID
+        # library wants bytes. Only the copy that is used to tell two
+        # interfaces apart is decoded.
+        raw_path = dev.get("path", b"")
+        path = raw_path.decode("utf-8", errors="replace") \
+            if isinstance(raw_path, bytes) else raw_path
         is_receiver = "receiver" in product_string.lower()
 
         answered: set[int] = set()
@@ -342,7 +345,7 @@ def read_devices() -> list[LogitechDevice]:
                     continue
                 try:
                     controller = LogitechHidpp(
-                        path, product_id, product_string, index,
+                        raw_path, product_id, product_string, index,
                         report_id, length)
                 except LogitechError:
                     continue

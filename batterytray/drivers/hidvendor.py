@@ -297,7 +297,7 @@ def read_vxe_keyboards() -> list[HidBatteryDevice]:
 
         try:
             handle = hid.device()
-            handle.open_path(raw_path)
+            hidsupport.open_interface(handle, raw_path)
         except OSError:
             continue
 
@@ -354,10 +354,11 @@ def read_devices() -> list[HidBatteryDevice]:
     seen_names: set[str] = set()
 
     for dev, protocol in _candidate_interfaces():
-        path = _path_text(dev.get("path", ""))
+        # The path goes back to the HID library as the system gave it,
+        # because the library wants bytes there.
         try:
             handle = hid.device()
-            handle.open_path(path)
+            hidsupport.open_interface(handle, dev.get("path", b""))
         except OSError:
             continue
 

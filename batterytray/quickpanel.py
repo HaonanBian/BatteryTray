@@ -222,6 +222,12 @@ class DeviceRow(tk.Frame):
         size = scale_pixels(ICON_SIZE, self.dpi)
         key = (self._kind, size, device.percent, device.charging)
         if key != self._icon_key:
+            # The old picture is dropped here and not left to the garbage
+            # collector: its finalizer calls back into tkinter, and doing
+            # that from inside another tkinter call ends the process with
+            # an access violation. Releasing it here keeps the call on a
+            # path where tkinter is not busy.
+            self._icon_photo = None
             self._icon_photo = ImageTk.PhotoImage(
                 build_device_icon(self._kind, device.percent,
                                   device.charging, device.connected, size=size))
@@ -243,6 +249,17 @@ class DeviceRow(tk.Frame):
             text, state_color = device.subtitle, MUTED
         self.state_label.configure(text=text, fg=state_color)
         self._clip_name()
+
+    def destroy(self) -> None:
+        """Releases the icon before the row itself goes away.
+
+        The picture belongs to this row and its finalizer calls back into
+        tkinter. Dropping it here means it is gone while the interpreter
+        is still there, instead of during some later call that happens to
+        trigger a garbage collection.
+        """
+        self._icon_photo = None
+        super().destroy()
 
     def _clip_name(self) -> None:
         """Keeps a long name inside the row, before the percentage."""

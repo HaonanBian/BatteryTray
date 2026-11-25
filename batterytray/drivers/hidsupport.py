@@ -53,3 +53,21 @@ def failure_count() -> int:
 def last_error() -> str:
     """The reason the HID subsystem gave the last time it refused."""
     return _last_error
+
+
+def open_interface(handle, path: bytes | str) -> None:
+    """Opens the interface that a path from ``enumerate`` points at.
+
+    The path is handed to a C function of the HID library, and that
+    function wants bytes. The drivers keep a readable copy of the path
+    for their bookkeeping, and handing that copy back does not raise an
+    OSError but a TypeError, which no driver catches: the whole driver
+    stops working and a connected mouse looks like no mouse at all. That
+    is what happened to the ASUS mouse.
+
+    Every driver therefore opens its interface through this helper, and
+    a path that was turned into text on the way is turned back here.
+    """
+    if isinstance(path, str):
+        path = path.encode("utf-8", errors="surrogateescape")
+    handle.open_path(path)
