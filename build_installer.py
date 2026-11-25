@@ -28,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "build_installer"
 DIST = ROOT / "release"
-VERSION = "1.3.3"
+VERSION = "1.3.4"
 
 APP_NAME = "BatteryTray"
 APP_EXE = "BatteryTray.exe"
@@ -231,6 +231,9 @@ def clean_old_versions() -> None:
     would leave the files of the previous versions behind and the folder
     would grow with every release. Only the files of the current version
     are kept.
+
+    A file that is still in use cannot be deleted. That is not a reason
+    to stop the build, so such a file is only reported.
     """
     current = VERSION
     patterns = [
@@ -240,15 +243,25 @@ def clean_old_versions() -> None:
         f"NOTES-*.md",
     ]
     removed = []
+    kept = []
     for pattern in patterns:
         for path in DIST.glob(pattern):
             if current in path.name:
                 continue
-            path.unlink()
+            try:
+                path.unlink()
+            except OSError:
+                # The file is in use, so it stays for now.
+                kept.append(path.name)
+                continue
             removed.append(path.name)
     if removed:
         print("==> 清理旧版本：")
         for name in sorted(removed):
+            print(f"    {name}")
+    if kept:
+        print("==> 这些旧文件还在使用中，没能删掉：")
+        for name in sorted(kept):
             print(f"    {name}")
 
 

@@ -11,6 +11,7 @@ build_installer/build/
 build_installer/dist/
 build_installer/stage/
 build_installer/test_install/
+build_installer/*.log
 dist/
 
 # pytest
