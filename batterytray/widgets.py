@@ -43,6 +43,10 @@ BG_BORDER = "#3A424A"
 BG_FIELD = "#161B20"
 # The colour of a divider line.
 BG_DIVIDER = "#333B43"
+# The colour of the trough of a scroll bar.
+BG_SCROLL = "#24262A"
+# The colour of the handle of a scroll bar.
+BG_SCROLL_HANDLE = "#3A3D42"
 # The colour of a small chip, such as the one that names the device kind.
 BG_CHIP = "#2C343C"
 # The colour of a chip while the pointer is over the card.

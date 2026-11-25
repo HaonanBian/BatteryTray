@@ -19,6 +19,7 @@ from PIL import ImageTk
 from .dpi import scale_pixels
 from .dwm import apply_rounded_corners, frame_handle
 from .icon import build_device_icon
+from .widgets import BG, BG_CARD_HOVER, BG_DIVIDER, FG, FG_MUTED
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 
@@ -36,12 +37,17 @@ user32.UnhookWindowsHookEx.restype = wt.BOOL
 WH_MOUSE_LL = 14
 WM_LBUTTONDOWN = 0x0201
 
-PANEL_BG = "#1B2023"
-PANEL_BORDER = "#2A3237"
-DIVIDER = "#2B3237"
-FG = "#F1F3F4"
-MUTED = "#9AA3A8"
+# The panel uses the palette of the main window, so that it does not look
+# like a window of a different program.
+PANEL_BG = BG
+PANEL_BORDER = BG_DIVIDER
+DIVIDER = BG_DIVIDER
+FG = FG
+MUTED = FG_MUTED
 CHARGING = "#8FC3DF"
+
+# The colour of a row while the pointer is over it.
+ROW_HOVER = BG_CARD_HOVER
 
 PANEL_WIDTH = 340
 ROW_HEIGHT = 58
@@ -158,7 +164,7 @@ class DeviceRow(tk.Frame):
     # ------------------------------------------------------------------
 
     def _fill(self) -> str:
-        return "#222A2E" if self._hover else PANEL_BG
+        return ROW_HOVER if self._hover else PANEL_BG
 
     def _enter(self, _event=None) -> None:
         if self._hover:
@@ -187,7 +193,7 @@ class DeviceRow(tk.Frame):
     def _open_rename_menu(self, event=None) -> None:
         if self.on_rename is None:
             return
-        menu = tk.Menu(self, tearoff=0, bg="#2A3136", fg=FG,
+        menu = tk.Menu(self, tearoff=0, bg="#2A3138", fg=FG,
                        activebackground="#A9D3B6", activeforeground="#142019",
                        font=(self.family, -scale_pixels(9, self.dpi)))
         menu.add_command(label="重命名设备",

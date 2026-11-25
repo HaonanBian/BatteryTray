@@ -27,6 +27,8 @@ a = Analysis(
         "batterytray.update",
         "batterytray.updatedialog",
         "batterytray.widgets",
+        "batterytray.diagnostics",
+        "batterytray.diagnosticdialog",
         "batterytray.drivers.razer",
         "batterytray.drivers.mouseconfig",
         "batterytray.drivers.asusmouse",

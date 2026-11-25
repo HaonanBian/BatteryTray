@@ -31,18 +31,24 @@ from .drivers.mouseconfig import (
     MouseController,
 )
 from .dpi import scale_font, scale_pixels
+from .widgets import (
+    ACCENT,
+    BG,
+    BG_BORDER,
+    BG_CARD,
+    BG_FIELD,
+    DANGER,
+    FG,
+    FG_DIM,
+    FG_MUTED,
+    WARNING,
+)
 
-BG = "#111113"
-BG_CARD = "#1C1D20"
-BG_FIELD = "#101113"
-BG_BORDER = "#2E3035"
-FG = "#EDEDED"
-FG_DIM = "#9C9EA3"
-FG_MUTED = "#6A6C71"
-ACCENT = "#00E676"
-ACCENT_DARK = "#00A854"
-DANGER = "#F44336"
-WARNING = "#FFB300"
+# The ink on top of the accent colour of a button.
+ACCENT_INK = "#142019"
+# The colour of a plain button of the dark theme.
+BUTTON_BG = "#2A3138"
+BUTTON_HOVER = "#333B43"
 
 # The DPI values the picker offers. The mouse accepts any value from 100 to
 # 35000, so the entry also accepts a typed number.
@@ -103,14 +109,14 @@ class ConfirmDialog(tk.Toplevel):
         buttons = tk.Frame(self, bg=BG)
         buttons.pack(fill="x", padx=s(20), pady=(0, s(18)))
 
-        tk.Button(buttons, text="取消", bg="#24262A", fg=FG_DIM,
-                  activebackground="#2E3136", activeforeground=FG,
+        tk.Button(buttons, text="取消", bg=BUTTON_BG, fg=FG_DIM,
+                  activebackground=BUTTON_HOVER, activeforeground=FG,
                   relief="flat", bd=0, cursor="hand2",
                   font=(family, f(9)),
                   command=self._cancel).pack(side="right")
 
         tk.Button(buttons, text=confirm_text, bg=DANGER, fg="#FFFFFF",
-                  activebackground="#FF5548", activeforeground="#FFFFFF",
+                  activebackground="#E8A9AF", activeforeground="#FFFFFF",
                   relief="flat", bd=0, cursor="hand2",
                   font=(family, f(9), "bold"),
                   command=self._confirm).pack(side="right",
@@ -238,7 +244,7 @@ class MouseSettingsDialog(tk.Toplevel):
         presets.pack(fill="x", pady=(s(6), 0))
         for value in DPI_PRESETS:
             btn = tk.Button(presets, text=str(value), bg=BG_CARD, fg=FG_DIM,
-                            activebackground="#2E3136", activeforeground=ACCENT,
+                            activebackground=BUTTON_HOVER, activeforeground=ACCENT,
                             relief="flat", bd=0, cursor="hand2",
                             font=(self.family, self._f(8)),
                             command=lambda v=value: self.dpi_var.set(v))
@@ -257,14 +263,14 @@ class MouseSettingsDialog(tk.Toplevel):
         # options at construction, so everything is set afterwards.
         self.poll_menu = tk.OptionMenu(poll_row, self.poll_var, ["1000 Hz"])
         self.poll_menu.configure(
-            bg=BG_FIELD, fg=FG, activebackground="#2E3136",
+            bg=BG_FIELD, fg=FG, activebackground=BUTTON_HOVER,
             activeforeground=ACCENT, relief="flat", bd=0,
             highlightthickness=1, highlightbackground=BG_BORDER,
             highlightcolor=ACCENT, font=(self.family, self._f(9)),
             indicatoron=True, anchor="w")
         # The dropdown list needs its own menu to pick up the dark colours.
         dropdown = tk.Menu(self.poll_menu, tearoff=0,
-                           bg=BG_FIELD, fg=FG, activebackground="#2E3136",
+                           bg=BG_FIELD, fg=FG, activebackground=BUTTON_HOVER,
                            activeforeground=ACCENT, relief="flat", bd=0,
                            font=(self.family, self._f(9)))
         self.poll_menu["menu"] = dropdown
@@ -313,8 +319,8 @@ class MouseSettingsDialog(tk.Toplevel):
         buttons = tk.Frame(self, bg=BG)
         buttons.pack(fill="x", side="bottom", padx=s(20), pady=s(16))
 
-        self.close_button = tk.Button(buttons, text="关闭", bg="#24262A", fg=FG,
-                                      activebackground="#2E3136",
+        self.close_button = tk.Button(buttons, text="关闭", bg=BUTTON_BG, fg=FG,
+                                      activebackground=BUTTON_HOVER,
                                       activeforeground=FG, relief="flat", bd=0,
                                       cursor="hand2",
                                       font=(self.family, self._f(9)),
@@ -322,8 +328,8 @@ class MouseSettingsDialog(tk.Toplevel):
         self.close_button.pack(side="right")
 
         self.apply_button = tk.Button(buttons, text="应用", bg=ACCENT,
-                                       fg="#101113", activebackground="#00F07F",
-                                       activeforeground="#101113", relief="flat",
+                                       fg=ACCENT_INK, activebackground="#BADFC7",
+                                       activeforeground=ACCENT_INK, relief="flat",
                                        bd=0, cursor="hand2",
                                        font=(self.family, self._f(9), "bold"),
                                        command=self._apply)
@@ -332,8 +338,8 @@ class MouseSettingsDialog(tk.Toplevel):
         # The factory reset sits on the left, away from the buttons the
         # user presses by accident.
         self.factory_button = tk.Button(
-            buttons, text="恢复出厂设置", bg="#24262A", fg=DANGER,
-            activebackground="#2E3136", activeforeground=DANGER,
+            buttons, text="恢复出厂设置", bg=BUTTON_BG, fg=DANGER,
+            activebackground=BUTTON_HOVER, activeforeground=DANGER,
             relief="flat", bd=0, cursor="hand2",
             font=(self.family, self._f(9)),
             command=self._ask_factory_reset)
@@ -465,7 +471,7 @@ class MouseSettingsDialog(tk.Toplevel):
 
         rates = settings.supported_rates
         dropdown = tk.Menu(self.poll_menu, tearoff=0,
-                           bg=BG_FIELD, fg=FG, activebackground="#2E3136",
+                           bg=BG_FIELD, fg=FG, activebackground=BUTTON_HOVER,
                            activeforeground=ACCENT, relief="flat", bd=0,
                            font=(self.family, self._f(9)))
         for rate in rates:
@@ -574,7 +580,7 @@ class MouseSettingsDialog(tk.Toplevel):
 
             dropdown = tk.Menu(row, tearoff=0,
                                bg=BG_FIELD, fg=FG,
-                               activebackground="#2E3136",
+                               activebackground=BUTTON_HOVER,
                                activeforeground=ACCENT, relief="flat", bd=0,
                                font=(self.family, self._f(9)))
             for label, option in options.items():
@@ -585,7 +591,7 @@ class MouseSettingsDialog(tk.Toplevel):
 
             picker = tk.Menubutton(row, textvariable=var, relief="flat", bd=0,
                                     bg=BG_FIELD, fg=FG,
-                                    activebackground="#2E3136",
+                                    activebackground=BUTTON_HOVER,
                                     activeforeground=ACCENT,
                                     highlightthickness=1,
                                     highlightbackground=BG_BORDER,
@@ -599,7 +605,7 @@ class MouseSettingsDialog(tk.Toplevel):
 
         # One button restores every button at once.
         tk.Button(self.buttons_box, text="全部恢复默认", bg=BG_CARD,
-                  fg=FG_DIM, activebackground="#2E3136", activeforeground=ACCENT,
+                  fg=FG_DIM, activebackground=BUTTON_HOVER, activeforeground=ACCENT,
                   relief="flat", bd=0, cursor="hand2",
                   font=(self.family, self._f(8)), padx=self._scale(10),
                   pady=self._scale(4),

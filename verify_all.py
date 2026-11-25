@@ -1554,6 +1554,126 @@ def test_the_xbox_controller_is_found_through_xinput():
         assert device.percent is None or 1 <= device.percent <= 100
 
 
+def test_the_windows_use_one_palette():
+    """Every window of the app has to use the colours of the main window.
+
+    The rename window and the mouse settings window carried their own
+    colours for a long time, which made them look like windows of a
+    different program.
+    """
+    from batterytray import mousesettingsdialog, quickpanel, renamedialog
+    from batterytray.widgets import (ACCENT, BG, BG_BORDER, BG_CARD, BG_FIELD,
+                                     FG, FG_MUTED)
+
+    assert renamedialog.BG == BG
+    assert renamedialog.BG_FIELD == BG_FIELD
+    assert renamedialog.BG_BORDER == BG_BORDER
+    assert renamedialog.FG == FG
+    assert renamedialog.ACCENT == ACCENT
+
+    assert mousesettingsdialog.BG == BG
+    assert mousesettingsdialog.BG_CARD == BG_CARD
+    assert mousesettingsdialog.BG_FIELD == BG_FIELD
+    assert mousesettingsdialog.FG == FG
+    assert mousesettingsdialog.ACCENT == ACCENT
+    assert mousesettingsdialog.FG_MUTED == FG_MUTED
+
+    assert quickpanel.PANEL_BG == BG
+    assert quickpanel.FG == FG
+    assert quickpanel.MUTED == FG_MUTED
+
+
+def test_the_report_names_every_driver():
+    """The report has to say what every driver answered.
+
+    A user who sees no device at all cannot tell what went wrong, so
+    the report asks every driver on its own.
+    """
+    from batterytray.diagnostics import build_report
+
+    report = build_report()
+    for name in ("razer", "logitech", "hidvendor", "vendor2", "xbox",
+                 "bluetooth"):
+        assert name in report, name
+    # The machine itself is part of the report, because the same program
+    # behaves differently on different systems.
+    assert "程序版本" in report
+    assert "时区" in report
+
+
+def test_the_report_survives_a_failing_driver(monkeypatch):
+    """A driver that fails must not stop the report.
+
+    The report is exactly what a user needs when a driver fails, so it
+    has to be written down and the rest has to keep going.
+    """
+    from batterytray import diagnostics
+
+    def failing():
+        raise OSError("Access is denied.")
+
+    monkeypatch.setattr(diagnostics.razer, "read_devices", failing)
+    report = diagnostics.build_report()
+    assert "Access is denied" in report
+    # The other parts are still there.
+    assert "HID 子系统" in report
+    assert "蓝牙栈" in report
+
+
+def test_the_report_says_which_driver_failed():
+    """The failures of the drivers have to be in the report."""
+    from batterytray import diagnostics
+
+    devices, failures = collect_devices(Config())
+    report = diagnostics.build_report()
+    assert "应用最终显示的设备" in report
+    if failures:
+        assert "失败的驱动" in report
+
+
+def test_the_diagnostic_button_is_in_the_settings():
+    """The settings window has to offer the report."""
+    from batterytray.settingsdialog import SettingsDialog
+
+    assert hasattr(SettingsDialog, "_open_diagnostic")
+    assert hasattr(SettingsDialog, "_diagnostic_hint")
+
+
+def test_the_diagnostic_button_is_always_in_sight():
+    """The button that opens the report has to be in the footer.
+
+    The button used to sit in a group of its own, which meant that it
+    could only be reached after scrolling to the bottom.
+    """
+    import tkinter as tk
+
+    from batterytray.config import Config
+    from batterytray.settingsdialog import SettingsDialog
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        dialog = SettingsDialog(root, Config(), "TkDefaultFont", 96.0)
+        dialog.update_idletasks()
+        buttons = []
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                if type(child).__name__ == "GlassButton":
+                    buttons.append(child)
+                walk(child)
+
+        walk(dialog)
+        assert buttons, "设置窗口里没有按钮"
+        # The button sits in the footer, so it is on screen from the start.
+        diagnostic = [b for b in buttons if b._text == "诊断"]
+        assert diagnostic, "设置窗口里没有诊断按钮"
+        assert diagnostic[0].winfo_ismapped(), "诊断按钮被藏起来了"
+        dialog.destroy()
+    finally:
+        root.destroy()
+
+
 def test_bluetooth_reads_a_headset():
     devices = bluetooth.read_devices()
     for device in devices:

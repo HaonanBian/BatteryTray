@@ -27,6 +27,8 @@ from .widgets import (
     BG_CARD,
     BG_DIVIDER,
     BG_FIELD,
+    BG_SCROLL,
+    BG_SCROLL_HANDLE,
     FG,
     FG_DIM,
     FG_MUTED,
@@ -248,7 +250,7 @@ class SettingsDialog(tk.Toplevel):
         self.scrollbar = tk.Scrollbar(wrap, orient="vertical",
                                       command=self.canvas.yview,
                                       width=s(10), troughcolor=BG,
-                                      bg="#24262A", activebackground="#3A3D42",
+                                      bg=BG_SCROLL, activebackground=BG_SCROLL_HANDLE,
                                       bd=0, highlightthickness=0)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
@@ -270,6 +272,7 @@ class SettingsDialog(tk.Toplevel):
             self._threshold_block(config),
             self._interval_block(config),
             self._tray_block(config),
+            self._diagnostic_hint(),
         ]
         # A card does not grow by itself inside a canvas, so every card is
         # told how tall its rows made it before the window is laid out.
@@ -289,6 +292,12 @@ class SettingsDialog(tk.Toplevel):
         GlassButton(footer, "取消", self.family, dpi,
                     command=self._cancel,
                     background=BG).pack(side="right", padx=(0, s(10)),
+                                        pady=s(10))
+        # The report is the way out for a user who sees no device at all,
+        # so the button sits in the footer where it is always in sight.
+        GlassButton(footer, "诊断", self.family, dpi,
+                    command=self._open_diagnostic,
+                    background=BG).pack(side="left", padx=s(18),
                                         pady=s(10))
 
     def _new_block(self, title: str, hint: str) -> tuple[tk.Frame, _Card]:
@@ -400,6 +409,26 @@ class SettingsDialog(tk.Toplevel):
         self.disconnected_var = tk.BooleanVar(value=config.hide_disconnected)
         self._check(self._row(card), "隐藏未连接的设备", self.disconnected_var)
         return block
+
+    def _diagnostic_hint(self) -> tk.Frame:
+        """A line that points to the report in the footer.
+
+        A machine that shows no device at all gives no clue what went
+        wrong, so the report says what every driver answered. The button
+        that opens it sits in the footer, where it is always in sight.
+        """
+        block = tk.Frame(self.inner, bg=BG)
+        tk.Label(block, text="设备读不到时，用下方的「诊断」按钮"
+                 "把报告发给我。", bg=BG, fg=FG_MUTED,
+                 font=(self.family, -scale_pixels(9, self.dpi)),
+                 anchor="w", justify="left").pack(fill="x")
+        return block
+
+    def _open_diagnostic(self) -> None:
+        """Shows the window with the diagnostic report."""
+        from .diagnosticdialog import ask_diagnostic
+
+        ask_diagnostic(self, self.family, self.dpi)
 
     # -- the responsive layout ------------------------------------------
 

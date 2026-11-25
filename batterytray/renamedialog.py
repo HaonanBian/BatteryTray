@@ -1,7 +1,8 @@
 """A small dialog that asks for a new device name.
 
 The dialog is used by the main window and by the quick popup, so the rename
-works the same way in both places.
+works the same way in both places. It uses the palette of the main window,
+so that it does not look like a window of a different program.
 """
 
 from __future__ import annotations
@@ -10,14 +11,10 @@ import tkinter as tk
 
 from .dialog import prepare_dialog
 from .dpi import scale_font, scale_pixels
+from .widgets import ACCENT, BG, BG_BORDER, BG_FIELD, FG, FG_DIM, FG_MUTED
 
-BG = "#17181B"
-BG_FIELD = "#101113"
-BG_BORDER = "#34363B"
-FG = "#EDEDED"
-FG_DIM = "#9C9EA3"
-FG_MUTED = "#9C9EA3"
-ACCENT = "#00E676"
+# The ink on top of the accent colour of a button.
+ACCENT_INK = "#142019"
 
 
 class RenameDialog(tk.Toplevel):
@@ -59,20 +56,20 @@ class RenameDialog(tk.Toplevel):
         buttons = tk.Frame(self, bg=BG)
         buttons.pack(fill="x", padx=pad, pady=(scale_pixels(14, dpi), pad))
 
-        tk.Button(buttons, text="恢复默认", bg="#232529", fg=FG_DIM,
-                  activebackground="#2E3035", activeforeground=FG,
+        tk.Button(buttons, text="恢复默认", bg="#2A3138", fg=FG_DIM,
+                  activebackground="#333B43", activeforeground=FG,
                   relief="flat", bd=0, cursor="hand2",
                   font=(family, scale_font(9, dpi)),
                   command=self._reset).pack(side="left")
 
-        tk.Button(buttons, text="取消", bg="#232529", fg=FG_DIM,
-                  activebackground="#2E3035", activeforeground=FG,
+        tk.Button(buttons, text="取消", bg="#2A3138", fg=FG_DIM,
+                  activebackground="#333B43", activeforeground=FG,
                   relief="flat", bd=0, cursor="hand2",
                   font=(family, scale_font(9, dpi)),
                   command=self._cancel).pack(side="right")
 
-        tk.Button(buttons, text="保存", bg=ACCENT, fg="#101113",
-                  activebackground="#00F07F", activeforeground="#101113",
+        tk.Button(buttons, text="保存", bg=ACCENT, fg=ACCENT_INK,
+                  activebackground="#BADFC7", activeforeground=ACCENT_INK,
                   relief="flat", bd=0, cursor="hand2",
                   font=(family, scale_font(9, dpi), "bold"),
                   command=self._confirm).pack(side="right",
