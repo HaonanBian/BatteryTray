@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "BatteryTray"
-APP_VERSION = "1.3.6"
+APP_VERSION = "1.3.7"
 PUBLISHER = "BatteryTray"
 
 # The per-user uninstall entry. It lives under HKEY_CURRENT_USER, so no

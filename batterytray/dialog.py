@@ -22,15 +22,15 @@ from .dwm import style_window
 def prepare_dialog(dialog: tk.Toplevel, master: tk.Misc | None = None) -> None:
     """Makes a dialog ready to be shown.
 
-    The dialog is put on top of the other windows, gets the dark title bar
-    of the app and is bound to the master only when the master is on
+    The dialog is put in front of the other windows, gets the dark title
+    bar of the app and is bound to the master only when the master is on
     screen. A dialog without an owner keeps showing itself, even when the
     window it was opened from is hidden in the meantime.
-    """
-    # The dialog has to stay on top of the borderless popup and of the
-    # main window.
-    dialog.attributes("-topmost", True)
 
+    The dialog is deliberately *not* kept above everything: a window that
+    cannot be covered is in the way as soon as the user wants to work
+    with another program next to it.
+    """
     if master is not None and master.winfo_viewable():
         dialog.transient(master)
     else:

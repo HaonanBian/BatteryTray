@@ -293,7 +293,9 @@ class QuickPanel(tk.Toplevel):
         self._watcher = MouseWatcher()
 
         self.overrideredirect(True)
-        self.attributes("-topmost", True)
+        # The panel is not kept above the other windows of the desktop.
+        # It is raised when it opens, and after that it is an ordinary
+        # window: the user may put another window over it.
         self.configure(bg=PANEL_BORDER)
         self.title("BatteryTray 电量")
         self.withdraw()
@@ -378,13 +380,24 @@ class QuickPanel(tk.Toplevel):
 
         self.geometry(f"+{x}+{y}")
         self.deiconify()
+        # The panel comes to the front for the moment it opens only. It is
+        # not kept there: after that it is an ordinary window, and another
+        # window may be put over it.
         self.lift()
         self.attributes("-topmost", True)
+        self.after(80, self._drop_topmost)
         self._visible = True
         self._round_corners()
         self._opened_at = time.monotonic()
         self._watcher.start()
         self._watch()
+
+    def _drop_topmost(self) -> None:
+        """Lets the other windows cover the panel again."""
+        try:
+            self.attributes("-topmost", False)
+        except tk.TclError:
+            pass
 
     def _round_corners(self) -> None:
         def apply():

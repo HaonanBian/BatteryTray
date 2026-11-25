@@ -2567,6 +2567,48 @@ def test_window_posts_work_to_the_tkinter_thread(gui_window):
     assert calls == [42]
 
 
+def test_a_dialog_can_be_covered_by_another_window(gui_window):
+    """No window of the app may stay above everything else.
+
+    Being always on top is convenient for a moment, but a window that
+    cannot be covered is in the way as soon as the user wants to work
+    with another program next to it.
+    """
+    pytest.importorskip("tkinter")
+    import tkinter as tk
+
+    from batterytray.dialog import prepare_dialog
+
+    dialog = tk.Toplevel(gui_window)
+    try:
+        prepare_dialog(dialog, gui_window)
+        gui_window.update()
+        assert not int(dialog.attributes("-topmost")), \
+            "a dialog has to be coverable"
+    finally:
+        dialog.destroy()
+        gui_window.update()
+
+
+def test_the_quick_panel_can_be_covered_after_it_opened(gui_window):
+    """The popup of the tray comes to the front, but does not stay there."""
+    from batterytray.quickpanel import QuickPanel
+
+    panel = QuickPanel(gui_window)
+    try:
+        assert not int(panel.attributes("-topmost")), \
+            "the panel must not be created on top of everything"
+        panel.show()
+        time.sleep(0.2)
+        gui_window.update()
+        assert not int(panel.attributes("-topmost")), \
+            "the panel has to be coverable once it is shown"
+    finally:
+        panel.hide()
+        panel.destroy()
+        gui_window.update()
+
+
 def test_a_dialog_stays_visible_when_the_main_window_is_hidden(gui_window):
     """A dialog must show up even when the main window is hidden.
 
