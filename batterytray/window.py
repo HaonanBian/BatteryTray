@@ -253,17 +253,6 @@ class BatteryWindow(tk.Tk):
                     background=BG).pack(side="right", padx=(0, s(10)),
                                         pady=s(6))
 
-        GlassButton(footer, "诊断", self.family, dpi,
-                    command=self._open_diagnostic,
-                    background=BG).pack(side="right", padx=(0, s(10)),
-                                        pady=s(6))
-
-    def _open_diagnostic(self) -> None:
-        """Shows the window with the diagnostic report."""
-        from .diagnosticdialog import ask_diagnostic
-
-        ask_diagnostic(self, self.family, self.dpi)
-
     def _open_settings(self) -> None:
         """Shows the settings dialog and applies the result."""
         self.open_settings()

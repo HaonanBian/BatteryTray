@@ -37,6 +37,8 @@ from .widgets import (
     BG_BORDER,
     BG_CARD,
     BG_FIELD,
+    BG_SCROLL,
+    BG_SCROLL_HANDLE,
     DANGER,
     FG,
     FG_DIM,
@@ -190,12 +192,22 @@ class MouseSettingsDialog(tk.Toplevel):
 
         self.title(f"鼠标设置 — {device_name}")
         self.configure(bg=BG)
-        self.resizable(False, False)
+        # The window can be resized. The content is put into a canvas that
+        # scrolls, so a window that is too small for all the rows still
+        # shows everything.
+        self.resizable(True, True)
+        self.minsize(scale_pixels(460, dpi), scale_pixels(400, dpi))
+        self.geometry(f"{scale_pixels(640, dpi)}x{scale_pixels(680, dpi)}")
         prepare_dialog(self, master)
 
         self._build()
         self.update_idletasks()
         self._centre()
+        # The wheel is bound to the whole window, because the pointer may
+        # rest on a label or a card while the user scrolls.
+        self.bind("<MouseWheel>", self._on_mousewheel)
+        self.bind("<Button-4>", self._on_mousewheel)
+        self.bind("<Button-5>", self._on_mousewheel)
         # Reading the mouse takes a moment, so it happens off the UI thread.
         self.after(60, self._load_async)
 
@@ -207,8 +219,42 @@ class MouseSettingsDialog(tk.Toplevel):
         """Builds the dialog layout."""
         s = lambda px: self._scale(px)  # noqa: E731
 
-        body = tk.Frame(self, bg=BG)
-        body.pack(fill="both", expand=True, padx=s(20), pady=s(16))
+        # The window uses grid on its own level, so the scrollable area
+        # really follows the size of the window. With pack the canvas
+        # would keep the height it had when the window was opened and
+        # the rows below the border would be cut off.
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # ---- The scrollable body ----
+        # The rows of the button mapping can be many, so the content sits
+        # in a canvas. The window can then be made smaller and the canvas
+        # scrolls the rows that do not fit.
+        wrap = tk.Frame(self, bg=BG)
+        wrap.grid(row=0, column=0, sticky="nsew")
+        wrap.grid_columnconfigure(0, weight=1)
+        wrap.grid_columnconfigure(1, weight=0, minsize=0)
+        wrap.grid_rowconfigure(0, weight=1)
+
+        self.canvas = tk.Canvas(wrap, bg=BG, highlightthickness=0, bd=0,
+                                height=s(120))
+        self.scrollbar = tk.Scrollbar(
+            wrap, orient="vertical", command=self.canvas.yview,
+            width=s(10), troughcolor=BG, bg=BG_SCROLL,
+            activebackground=BG_SCROLL_HANDLE, bd=0, highlightthickness=0)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.canvas.grid(row=0, column=0, sticky="nsew",
+                         padx=(s(20), s(6)), pady=(s(16), 0))
+        self.scrollbar.grid(row=0, column=1, sticky="ns",
+                            padx=(0, s(4)), pady=(s(16), 0))
+        # The bar only helps when the rows do not fit.
+        self.scrollbar.grid_remove()
+
+        body = tk.Frame(self.canvas, bg=BG)
+        self._body_id = self.canvas.create_window((0, 0), window=body,
+                                                  anchor="nw")
+        body.bind("<Configure>", self._on_body_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
 
         # ---- Status line ----
         self.status_label = tk.Label(body, text="正在读取鼠标设置…", bg=BG,
@@ -233,6 +279,11 @@ class MouseSettingsDialog(tk.Toplevel):
             highlightcolor=ACCENT, buttonbackground=BG_CARD,
             font=(self.family, self._f(10)))
         self.dpi_spin.pack(side="left")
+        # The spin box would change its number when the wheel turns, so
+        # the wheel is used to scroll the page instead.
+        self.dpi_spin.bind("<MouseWheel>", self._wheel_on_field)
+        self.dpi_spin.bind("<Button-4>", self._wheel_on_field)
+        self.dpi_spin.bind("<Button-5>", self._wheel_on_field)
 
         tk.Label(dpi_row, text=f"范围 {mouseconfig.MIN_DPI}–"
                                f"{mouseconfig.MAX_DPI}",
@@ -242,13 +293,16 @@ class MouseSettingsDialog(tk.Toplevel):
 
         presets = tk.Frame(body, bg=BG)
         presets.pack(fill="x", pady=(s(6), 0))
-        for value in DPI_PRESETS:
+        # The buttons are put in a grid, so they move to a second line when
+        # the window becomes too narrow for all of them.
+        for index, value in enumerate(DPI_PRESETS):
             btn = tk.Button(presets, text=str(value), bg=BG_CARD, fg=FG_DIM,
                             activebackground=BUTTON_HOVER, activeforeground=ACCENT,
                             relief="flat", bd=0, cursor="hand2",
                             font=(self.family, self._f(8)),
                             command=lambda v=value: self.dpi_var.set(v))
-            btn.pack(side="left", padx=(0, s(5)))
+            btn.grid(row=index // 4, column=index % 4, sticky="w",
+                     padx=(0, s(5)), pady=(0, s(4)))
 
         # ---- Polling rate ----
         tk.Frame(body, bg="#232428", height=1).pack(fill="x", pady=s(12))
@@ -315,9 +369,12 @@ class MouseSettingsDialog(tk.Toplevel):
         self.buttons_placeholder.pack(pady=s(8))
 
         # ---- Buttons ----
-        tk.Frame(self, bg="#232428", height=1).pack(fill="x", side="bottom")
+        # They sit in the second row of the window, so they keep their
+        # place at the bottom while the area above them changes size.
+        tk.Frame(self, bg="#232428", height=1).grid(row=1, column=0,
+                                                     sticky="ew")
         buttons = tk.Frame(self, bg=BG)
-        buttons.pack(fill="x", side="bottom", padx=s(20), pady=s(16))
+        buttons.grid(row=2, column=0, sticky="ew", padx=s(20), pady=s(16))
 
         self.close_button = tk.Button(buttons, text="关闭", bg=BUTTON_BG, fg=FG,
                                       activebackground=BUTTON_HOVER,
@@ -363,13 +420,80 @@ class MouseSettingsDialog(tk.Toplevel):
 
         return scale_pixels(pixels, self.dpi)
 
+    def _on_body_configure(self, _event=None) -> None:
+        """Keeps the scrollable area as large as the rows inside it."""
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        self._update_scrollbar()
+
+    def _on_canvas_configure(self, event) -> None:
+        """Lets the rows use the full width of the window."""
+        self.canvas.itemconfigure(self._body_id, width=event.width)
+        self._update_scrollbar()
+
+    def _update_scrollbar(self) -> None:
+        """Shows the scroll bar only when the rows do not fit."""
+        # The bar is always placed anew. Placing a widget that is already
+        # placed does nothing, so it would keep the place it had when the
+        # window was taller and end up outside of the window.
+        self.scrollbar.grid_remove()
+        bbox = self.canvas.bbox("all")
+        if bbox is None:
+            return
+        content_height = bbox[3] - bbox[1]
+        if content_height > self.canvas.winfo_height():
+            self.scrollbar.grid(row=0, column=1, sticky="ns",
+                                padx=(0, self._scale(4)),
+                                pady=(self._scale(16), 0))
+
+    def _on_mousewheel(self, event) -> None:
+        """Scrolls the rows with the mouse wheel."""
+        self._scroll(event)
+
+    def _wheel_on_field(self, event):
+        """Scrolls the page while the wheel turns over a number field.
+
+        The event is stopped here, so the window does not scroll a second
+        time and the number in the field does not change.
+        """
+        self._scroll(event)
+        # The spin box would change its number without this.
+        return "break"
+
+    def _scroll(self, event) -> None:
+        """Moves the visible part of the rows."""
+        if getattr(event, "num", None) == 4:
+            self.canvas.yview_scroll(-2, "units")
+            return
+        if getattr(event, "num", None) == 5:
+            self.canvas.yview_scroll(2, "units")
+            return
+
+        delta = getattr(event, "delta", 0)
+        if not delta:
+            return
+        if self.canvas.bbox("all") is None:
+            return
+        top = self.canvas.yview()[0]
+        bottom = self.canvas.yview()[1]
+        if top <= 0 and bottom >= 1:
+            # Everything is visible, there is nothing to scroll.
+            return
+        # A notch of the wheel is 120 units on Windows.
+        steps = int(-delta / 120) * 2 or (-2 if delta > 0 else 2)
+        self.canvas.yview_scroll(steps, "units")
+
     def _centre(self) -> None:
-        """Places the dialog in the middle of the screen."""
+        """Places the dialog in the middle of the screen.
+
+        The size of the window is the one that was asked for, not the one
+        the rows would need, so the dialog does not jump when the mouse
+        answers.
+        """
         import ctypes
 
         self.update_idletasks()
-        width = self.winfo_reqwidth()
-        height = self.winfo_reqheight()
+        width = self.winfo_width()
+        height = self.winfo_height()
         user32 = ctypes.WinDLL("user32")
         screen_w = user32.GetSystemMetrics(0)
         screen_h = user32.GetSystemMetrics(1)
@@ -540,6 +664,10 @@ class MouseSettingsDialog(tk.Toplevel):
                 highlightcolor=ACCENT, buttonbackground=BG_CARD,
                 font=(self.family, self._f(9)))
             spin.pack(side="left")
+            # The wheel scrolls the page, not the number in the field.
+            spin.bind("<MouseWheel>", self._wheel_on_field)
+            spin.bind("<Button-4>", self._wheel_on_field)
+            spin.bind("<Button-5>", self._wheel_on_field)
 
             tk.Label(row, text="档", bg=BG_CARD, fg=FG_MUTED,
                      font=(self.family, self._f(8))).pack(side="left",
