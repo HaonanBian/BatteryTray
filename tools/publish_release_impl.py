@@ -23,10 +23,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE_DIR = ROOT / "release"
 
+# The app has to be importable, so that the version can be read from it.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from batterytray import __version__  # noqa: E402
+
 OWNER = "HaonanBian"
 REPO = "BatteryTray"
-TAG = "v1.3.4"
-TITLE = "BatteryTray 1.3.4"
+
+# The version of the release. It is read from the app itself, so the
+# script and the build can never point at different versions.
+VERSION = __version__
+TAG = f"v{VERSION}"
+TITLE = f"BatteryTray {VERSION}"
 
 API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 
@@ -34,12 +44,12 @@ API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 # user: the installer first, then the portable archive and the single file
 # copy.
 ASSETS = [
-    "BatteryTray-Setup-1.3.3.exe",
-    "BatteryTray-1.3.3-portable.zip",
-    "BatteryTray-1.3.3.exe",
+    f"BatteryTray-Setup-{VERSION}.exe",
+    f"BatteryTray-{VERSION}-portable.zip",
+    f"BatteryTray-{VERSION}.exe",
 ]
 
-NOTES = "NOTES-1.3.3.md"
+NOTES = f"NOTES-{VERSION}.md"
 
 
 def request(method: str, url: str, token: str, data=None):

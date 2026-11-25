@@ -22,9 +22,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE_DIR = ROOT / "release"
 
+# The app has to be importable, so that the version can be read from it.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from batterytray import __version__  # noqa: E402
+
 OWNER = "HaonanBian"
 REPO = "BatteryTray"
-TAG = "v1.3.4"
+# The version comes from the app itself, so the script cannot point at a
+# different release than the one that was built.
+TAG = f"v{__version__}"
 
 API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 
