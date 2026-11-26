@@ -112,7 +112,7 @@ class DeviceRow(tk.Frame):
     """One device in the popup: ring icon, name, status and percentage."""
 
     def __init__(self, master: tk.Misc, family: str, number_family: str,
-                 dpi: float, on_rename=None, on_open=None):
+                 dpi: float, on_open=None):
         s = lambda px: scale_pixels(px, dpi)  # noqa: E731
         super().__init__(master, bg=PANEL_BG,
                          width=s(PANEL_WIDTH), height=s(ROW_HEIGHT))
@@ -120,7 +120,6 @@ class DeviceRow(tk.Frame):
         self.family = family
         self.number_family = number_family
         self.dpi = dpi
-        self.on_rename = on_rename
         self.on_open = on_open
         self._original_name = ""
         self._full_name = ""
@@ -154,7 +153,6 @@ class DeviceRow(tk.Frame):
 
         for widget in (self, self.icon_label, self.name_label,
                        self.state_label, self.percent_label):
-            widget.bind("<Button-3>", self._open_rename_menu)
             widget.bind("<Double-Button-1>", self._open_main)
             widget.bind("<Enter>", self._enter)
             widget.bind("<Leave>", self._leave)
@@ -189,25 +187,6 @@ class DeviceRow(tk.Frame):
     def _open_main(self, _event=None) -> None:
         if self.on_open is not None:
             self.on_open()
-
-    def _open_rename_menu(self, event=None) -> None:
-        if self.on_rename is None:
-            return
-        menu = tk.Menu(self, tearoff=0, bg="#2A3138", fg=FG,
-                       activebackground="#A9D3B6", activeforeground="#142019",
-                       font=(self.family, -scale_pixels(9, self.dpi)))
-        menu.add_command(label="重命名设备",
-                         command=lambda: self.on_rename(self._original_name))
-        try:
-            menu.tk_popup(event.x_root if event else self.winfo_rootx(),
-                          event.y_root if event else self.winfo_rooty())
-        finally:
-            menu.grab_release()
-
-    def _start_rename(self, _event=None) -> None:
-        if self.on_rename is None:
-            return
-        self.on_rename(self._original_name)
 
     # ------------------------------------------------------------------
     # Content
@@ -279,13 +258,12 @@ class DeviceRow(tk.Frame):
 class QuickPanel(tk.Toplevel):
     """The vertical device list shown when a tray icon is clicked."""
 
-    def __init__(self, master: tk.Misc, on_rename=None, on_open=None):
+    def __init__(self, master: tk.Misc, on_open=None):
         super().__init__(master)
 
         self.dpi = master.dpi
         self.family = master.family
         self.number_family = pick_number_family(self)
-        self.on_rename = on_rename
         self.on_open = on_open
         self._rows: list[DeviceRow] = []
         self._visible = False
@@ -334,8 +312,7 @@ class QuickPanel(tk.Toplevel):
 
         for index, device in enumerate(devices):
             row = DeviceRow(self.rows_frame, self.family, self.number_family,
-                            self.dpi, on_rename=self.on_rename,
-                            on_open=self.on_open)
+                            self.dpi, on_open=self.on_open)
             row.update(device)
             row.pack(fill="x")
             self._rows.append(row)

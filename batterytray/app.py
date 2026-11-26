@@ -697,7 +697,9 @@ class TrayApp:
                 break
 
             # Sleep until the next interval, or until a refresh is requested.
-            self._wake.clear()
+            # A refresh that arrives while the poll above was running has
+            # already set the event, so the wait returns at once and the
+            # loop reads the devices one more time.
             self._wake.wait(self.config.poll_interval_seconds)
             self._wake.clear()
 

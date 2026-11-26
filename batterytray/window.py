@@ -91,8 +91,7 @@ class BatteryWindow(tk.Tk):
         # The popup that the tray icon shows; it lives on top of the window.
         from .quickpanel import QuickPanel
 
-        self.quick_panel = QuickPanel(self, on_rename=self._ask_rename,
-                                      on_open=self._open_main_from_panel)
+        self.quick_panel = QuickPanel(self, on_open=self._open_main_from_panel)
 
         # Closing the window hides it; the tray icon keeps the app alive.
         self.protocol("WM_DELETE_WINDOW", self.withdraw)
@@ -484,30 +483,6 @@ class BatteryWindow(tk.Tk):
 
         ask_mouse_settings(self, display_name or original_name, product_id,
                            self.family, self.dpi)
-
-    def _ask_rename(self, original_name: str) -> None:
-        """Opens the rename dialog for a device.
-
-        Used by the quick popup, which has no room for an inline editor.
-        """
-        from .renamedialog import ask_rename
-
-        current = original_name
-        for card in self._cards:
-            if card._original_name == original_name:
-                current = card.name_label.cget("text")
-                break
-        else:
-            for row in self.quick_panel._rows:
-                if row._original_name == original_name:
-                    current = row.name_label.cget("text")
-                    break
-
-        new_name = ask_rename(self, self.family, self.dpi,
-                              original_name, current)
-        if new_name is None:
-            return
-        self._rename_device(original_name, new_name)
 
     def toggle_panel(self) -> None:
         """Shows or hides the popup with the battery levels."""

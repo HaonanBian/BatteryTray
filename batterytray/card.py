@@ -98,10 +98,17 @@ class DeviceCard(tk.Canvas):
     def _name_x(self) -> int:
         return scale_pixels(NAME_X, self.dpi)
 
-    def _right_icon(self) -> int:
-        """The x position of the single icon on the right of the card."""
+    def _right_icons(self) -> tuple[int, int]:
+        """The x positions of the settings gear and the rename pencil.
+
+        The pencil always sits on the far right, because every device can be
+        renamed; the gear only moves in front of it when the device has
+        settings to open.
+        """
         width = max(self.winfo_width(), 1)
-        return width - scale_pixels(20, self.dpi)
+        edit = width - scale_pixels(20, self.dpi)
+        gear = edit - scale_pixels(24, self.dpi)
+        return gear, edit
 
     def _on_configure(self, event=None) -> None:
         width = self.winfo_width()
@@ -160,14 +167,20 @@ class DeviceCard(tk.Canvas):
         self.coords(self._name_window, name_x, s(9))
         self.coords(self._status_window, name_x, s(35))
 
-        # ---- The settings button on the right ----
+        # ---- The settings and rename buttons on the right ----
+        gear, edit = self._right_icons()
         icon_y = height / 2
         if self._has_config:
-            self.create_text(self._right_icon(), icon_y, text="\ue713",
-                             fill=FG_MUTED, font=self._icon_font,
+            self.create_text(gear, icon_y, text="\ue713", fill=FG_MUTED,
+                             font=self._icon_font,
                              tags=("deco", "icon_config"))
             self.tag_bind("icon_config", "<Button-1>",
                           lambda _event: self._open_configure())
+        self.create_text(edit, icon_y, text="\ue70f", fill=FG_MUTED,
+                         font=self._icon_font,
+                         tags=("deco", "icon_rename"))
+        self.tag_bind("icon_rename", "<Button-1>",
+                      lambda _event: self._start_rename())
 
         # ---- The compact details at the right of the status line ----
         details = self._detail_text()
@@ -175,9 +188,10 @@ class DeviceCard(tk.Canvas):
             measure = tkfont.Font(root=self, font=self._detail_font)
             detail_w = measure.measure(details)
             status_w = self.status_label.winfo_reqwidth()
-            room = width - name_x - s(44)
+            edge = s(64) if self._has_config else s(44)
+            room = width - name_x - edge
             if status_w + detail_w + s(16) <= room:
-                self.create_text(width - s(44), s(44), text=details,
+                self.create_text(width - edge, s(44), text=details,
                                  anchor="e", fill=FG_MUTED,
                                  font=self._detail_font, tags="deco")
 
@@ -318,7 +332,7 @@ class DeviceCard(tk.Canvas):
         width = self.winfo_width()
         if width <= 1:
             return
-        room = width - self._name_x() - scale_pixels(46, self.dpi)
+        room = width - self._name_x() - scale_pixels(66, self.dpi)
         if room < scale_pixels(40, self.dpi):
             return
         measure = tkfont.Font(root=self, font=self._name_font)

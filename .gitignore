@@ -17,9 +17,8 @@ dist/
 # pytest
 .pytest_cache/
 
-# Release artifacts are committed intentionally so they can be
-# downloaded directly from the repository (raw links).
-# release/*.exe is NOT ignored.
+# Release artifacts live in the GitHub Releases of each version; the
+# repository keeps only the notes of the newest one.
 
 # Probe output and reference dumps from the protocol research
 asuskb.txt

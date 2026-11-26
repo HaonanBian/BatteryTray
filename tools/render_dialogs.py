@@ -1,4 +1,4 @@
-"""Draws the settings window and the rename window into picture files.
+"""Draws the settings window into a picture file.
 
 The pictures are only meant for looking at the windows while they are
 being worked on:
@@ -21,7 +21,6 @@ set_dpi_aware()
 
 import tkinter as tk  # noqa: E402
 
-from batterytray.renamedialog import RenameDialog  # noqa: E402
 from batterytray.settingsdialog import SettingsDialog  # noqa: E402
 from batterytray.window import pick_font_family  # noqa: E402
 
@@ -45,16 +44,6 @@ def main() -> int:
     print("saved out_test/settings.png", settings.winfo_width(),
           settings.winfo_height())
     settings.destroy()
-
-    rename = RenameDialog(root, family, dpi, "Razer Viper V3 Pro Wireless",
-                          "Razer Viper V3 Pro Wireless")
-    rename.update_idletasks()
-    time.sleep(0.4)
-    rename.update_idletasks()
-    grab(rename).save("out_test/rename.png")
-    print("saved out_test/rename.png", rename.winfo_width(),
-          rename.winfo_height())
-    rename.destroy()
 
     root.destroy()
     return 0

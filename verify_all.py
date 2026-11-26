@@ -1738,19 +1738,12 @@ def test_the_xbox_controller_is_found_through_xinput():
 def test_the_windows_use_one_palette():
     """Every window of the app has to use the colours of the main window.
 
-    The rename window and the mouse settings window carried their own
-    colours for a long time, which made them look like windows of a
-    different program.
+    The mouse settings window carried its own colours for a long time,
+    which made it look like a window of a different program.
     """
-    from batterytray import mousesettingsdialog, quickpanel, renamedialog
+    from batterytray import mousesettingsdialog, quickpanel
     from batterytray.widgets import (ACCENT, BG, BG_BORDER, BG_CARD, BG_FIELD,
                                      FG, FG_MUTED)
-
-    assert renamedialog.BG == BG
-    assert renamedialog.BG_FIELD == BG_FIELD
-    assert renamedialog.BG_BORDER == BG_BORDER
-    assert renamedialog.FG == FG
-    assert renamedialog.ACCENT == ACCENT
 
     assert mousesettingsdialog.BG == BG
     assert mousesettingsdialog.BG_CARD == BG_CARD
@@ -2416,24 +2409,64 @@ def test_refresh_wakes_the_loop_without_a_second_reader():
     app = TrayApp(config)
 
     calls = []
+    finished = threading.Event()
     original = app._poll
 
     def counting_poll():
         calls.append(1)
         original()
+        finished.set()
 
     app._poll = counting_poll
 
     thread = threading.Thread(target=app._loop, daemon=True)
     thread.start()
-    time.sleep(1.0)
+    # Wait for the first poll itself: a real read may take a while, and the
+    # refresh only makes sense once the loop is waiting for the next one.
+    assert finished.wait(60), "the first poll did not finish"
     app._request_refresh()
-    time.sleep(1.0)
+
+    deadline = time.time() + 60
+    while len(calls) < 2 and time.time() < deadline:
+        time.sleep(0.05)
+
     app._stop.set()
     app._wake.set()
-    thread.join(timeout=5)
+    thread.join(timeout=20)
 
     # The initial poll plus the refresh, with no overlapping readers.
+    assert len(calls) == 2, calls
+
+
+def test_a_refresh_during_a_poll_is_not_lost():
+    """A refresh asked for while the loop is reading runs one more poll."""
+    from batterytray.app import TrayApp
+
+    config = Config()
+    config.poll_interval = 3600
+    app = TrayApp(config)
+
+    calls = []
+
+    def slow_poll():
+        calls.append(1)
+        time.sleep(0.6)
+
+    app._poll = slow_poll
+
+    thread = threading.Thread(target=app._loop, daemon=True)
+    thread.start()
+    time.sleep(0.2)
+    app._request_refresh()
+
+    deadline = time.time() + 10
+    while len(calls) < 2 and time.time() < deadline:
+        time.sleep(0.05)
+
+    app._stop.set()
+    app._wake.set()
+    thread.join(timeout=20)
+
     assert len(calls) == 2, calls
 
 
@@ -3352,71 +3385,64 @@ def test_card_rename_can_be_cancelled(gui_window):
     assert card._full_name == "Mouse"
 
 
-def test_rename_dialog_returns_the_new_name(gui_window):
-    """The dialog hands the typed name back."""
-    from batterytray.renamedialog import RenameDialog
+def test_the_card_offers_a_rename_button(gui_window):
+    """Every card shows a pencil that opens the inline editor."""
+    window = gui_window
+    window.app = type("App", (), {
+        "rename_device": lambda self, original, new: None,
+    })()
+    window.set_devices([Device("Mouse", 70, kind="mouse")])
+    window.update_idletasks()
 
-    dialog = RenameDialog(gui_window, gui_window.family, gui_window.dpi,
-                          "Mouse", "Mouse")
-    try:
-        gui_window.update_idletasks()
-        assert dialog.entry.get() == "Mouse"
-        dialog.entry.delete(0, "end")
-        dialog.entry.insert(0, "游戏鼠标")
-        dialog._confirm()
-        assert dialog.result == "游戏鼠标"
-    finally:
-        try:
-            dialog.destroy()
-        except Exception:
-            pass
+    card = window._cards[0]
+    pencil = card.bbox("icon_rename")
+    gear = card.bbox("icon_config")
+    assert pencil is not None and gear is not None
+    assert pencil[0] > gear[0], "the pencil sits right of the gear"
 
-
-def test_rename_dialog_can_be_cancelled(gui_window):
-    from batterytray.renamedialog import RenameDialog
-
-    dialog = RenameDialog(gui_window, gui_window.family, gui_window.dpi,
-                          "Mouse", "Mouse")
-    try:
-        gui_window.update_idletasks()
-        dialog._cancel()
-        assert dialog.result is None
-    finally:
-        try:
-            dialog.destroy()
-        except Exception:
-            pass
+    card.event_generate("<Button-1>",
+                        x=(pencil[0] + pencil[2]) // 2,
+                        y=(pencil[1] + pencil[3]) // 2)
+    window.update_idletasks()
+    assert card._editor is not None
 
 
-def test_rename_dialog_can_reset_to_the_original_name(gui_window):
-    """Clearing the field restores the original name."""
-    from batterytray.renamedialog import RenameDialog
+def test_a_device_without_settings_can_still_be_renamed(gui_window):
+    """A device with no settings window keeps the pencil on its own."""
+    window = gui_window
+    window.app = type("App", (), {
+        "rename_device": lambda self, original, new: None,
+    })()
+    window.set_devices([Device("耳机", 90, kind="headset")])
+    window.update_idletasks()
 
-    dialog = RenameDialog(gui_window, gui_window.family, gui_window.dpi,
-                          "Mouse", "游戏鼠标")
-    try:
-        gui_window.update_idletasks()
-        dialog._reset()
-        assert dialog.entry.get() == ""
-    finally:
-        try:
-            dialog.destroy()
-        except Exception:
-            pass
+    card = window._cards[0]
+    assert card._has_config is False
+    assert not card.find_withtag("icon_config")
+    pencil = card.bbox("icon_rename")
+    assert pencil is not None
+    card.event_generate("<Button-1>",
+                        x=(pencil[0] + pencil[2]) // 2,
+                        y=(pencil[1] + pencil[3]) // 2)
+    window.update_idletasks()
+    assert card._editor is not None
 
 
-def test_quick_panel_row_offers_the_rename(gui_window):
-    """Right clicking a row opens the rename menu."""
+def test_the_quick_panel_does_not_rename_devices(gui_window):
+    """Renaming belongs to the main window only."""
+    import inspect
+
     from batterytray.quickpanel import QuickPanel
 
-    requests = []
-    panel = QuickPanel(gui_window, on_rename=requests.append)
+    assert "on_rename" not in inspect.signature(QuickPanel).parameters
+
+    panel = QuickPanel(gui_window)
     try:
         panel.set_devices([Device("Mouse", 80, kind="mouse")])
         gui_window.update_idletasks()
         row = panel._rows[0]
-        assert row._original_name == "Mouse"
-        assert row.on_rename is not None
+        assert not hasattr(row, "on_rename")
+        assert not hasattr(row, "_open_rename_menu")
     finally:
         panel.destroy()
 
