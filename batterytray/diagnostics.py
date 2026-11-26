@@ -19,12 +19,13 @@ import traceback
 
 from . import __version__
 from .config import Config
-from .drivers import bluetooth, hidsupport, hidvendor, logitech, razer
+from .drivers import asusmouse, bluetooth, hidsupport, hidvendor, logitech, razer
 from .drivers import vendor2, xbox
 
 # The drivers that are asked, in the order they are asked.
 DRIVERS = (
     ("razer", razer.read_devices),
+    ("asus", asusmouse.read_devices),
     ("logitech", logitech.read_devices),
     ("hidvendor", hidvendor.read_devices),
     ("vendor2", vendor2.read_devices),
@@ -102,6 +103,32 @@ def _collection_text(path: bytes | str) -> str:
         path = path.decode("utf-8", errors="replace")
     match = _COLLECTION.search(path)
     return match.group(0) if match else ""
+
+
+def _asus_lines() -> list[str]:
+    """Shows what the ASUS mouse driver did with every control interface.
+
+    The driver shows no device when the mouse does not answer, which looks
+    exactly like a mouse that is not there. The receiver of a mouse that
+    is paired over 2.4 GHz stays on the bus while the mouse is off, or
+    while it is still connected over Bluetooth, so the reason for every
+    interface has to be written down: it is the only clue.
+    """
+    lines: list[str] = []
+    interfaces = asusmouse._candidate_interfaces()
+    lines.append(f"  ASUS 控制接口数: {len(interfaces)}")
+    for device in interfaces:
+        lines.append(f"      0x{device.get('product_id', 0):04X} "
+                     f"{device.get('product_string')!r} "
+                     f"接口={_collection_text(device.get('path', ''))}")
+    attempts = asusmouse.last_attempts()
+    if attempts:
+        lines.append("  驱动器这次读到的结果:")
+        for attempt in attempts:
+            lines.append(f"      {attempt}")
+    elif interfaces:
+        lines.append("      （还没有记录。驱动可能没有被问过）")
+    return lines
 
 
 def _local_time(stamp: datetime.datetime | None) -> str:
@@ -218,9 +245,11 @@ def build_report() -> str:
     lines += _driver_lines()
     lines += _section("2. HID 子系统")
     lines += _hid_lines()
-    lines += _section("3. 蓝牙栈")
+    lines += _section("3. ASUS 鼠标控制接口")
+    lines += _asus_lines()
+    lines += _section("4. 蓝牙栈")
     lines += _bluetooth_lines()
-    lines += _section("4. 应用最终显示的设备")
+    lines += _section("5. 应用最终显示的设备")
     lines += _result_lines()
     lines.append("")
     return "\n".join(lines)

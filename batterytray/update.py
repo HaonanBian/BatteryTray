@@ -45,6 +45,36 @@ TIMEOUT = 15
 # The user agent that identifies the app. GitHub asks for one.
 USER_AGENT = "BatteryTray"
 
+# The variables the bootloader of the frozen program leaves for the
+# programs it starts. A copy of the program that is started with them
+# believes that its files are already unpacked and does not unpack them
+# itself. The folder they point at belongs to the copy that is being
+# replaced, and it is deleted when that copy exits, so the new copy dies
+# with "Failed to load Python DLL". They are removed before it starts.
+FROZEN_ENVIRONMENT = (
+    "_MEIPASS",
+    "_MEIPASS2",
+    "_PYI_APPLICATION_HOME_DIR",
+    "_PYI_ARCHIVE_FILE",
+    "_PYI_PARENT_PROCESS_LEVEL",
+    "_PYI_SPLASH_IPC",
+)
+
+
+def clean_environment(environment: dict[str, str] | None = None) -> dict[str, str]:
+    """Returns an environment without the variables of the bootloader.
+
+    The program is frozen with PyInstaller. Its bootloader unpacks the
+    program into a folder in the temporary directory and tells the child
+    process where that folder is. A program that is started later with
+    that answer believes the folder is still there, skips the unpacking
+    and fails to load its own Python runtime.
+    """
+    source = os.environ if environment is None else environment
+    removed = {name.upper() for name in FROZEN_ENVIRONMENT}
+    return {name: value for name, value in source.items()
+            if name.upper() not in removed}
+
 
 class UpdateError(Exception):
     """Something went wrong while looking for an update."""
@@ -407,7 +437,11 @@ def _replace_script(target: Path, source: Path, backup: Path,
     # two of them confuses the command interpreter.
     launcher.write_text(
         "@echo off\r\n"
-        f'start "" "{target}"\r\n',
+        # The new copy must not inherit the answers of the bootloader of
+        # the running copy: they point at the folder that was unpacked
+        # for it, and that folder is deleted when it exits.
+        + "".join(f'set "{name}="\r\n' for name in FROZEN_ENVIRONMENT)
+        + f'start "" "{target}"\r\n',
         encoding="mbcs", errors="replace", newline="")
     script.write_text(
         "@echo off\r\n"
@@ -518,6 +552,7 @@ def apply_update(source: Path, target: Path | None = None) -> bool:
     script = _replace_script(target, source, backup, os.getpid())
     try:
         subprocess.Popen(["cmd.exe", "/c", str(script)], cwd=str(script.parent),
+                         env=clean_environment(),
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, subprocess.SubprocessError) as exc:
         raise UpdateError(f"无法启动更新程序：{exc}") from exc

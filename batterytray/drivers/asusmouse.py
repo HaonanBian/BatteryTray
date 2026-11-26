@@ -44,6 +44,32 @@ import hid
 
 from . import hidsupport
 
+# What the last read_devices() call did with every control interface it
+# saw. A mouse that does not answer leaves no other trace, and a report
+# that only says "0 devices" cannot be acted on, so the outcome of each
+# interface is written down for the diagnostic report.
+_attempts: list[str] = []
+
+
+def last_attempts() -> tuple[str, ...]:
+    """The outcome of the control interfaces of the last read."""
+    return tuple(_attempts)
+
+
+def _note(text: str) -> None:
+    """Writes down what happened with one control interface."""
+    _attempts.append(text)
+
+
+def _interface_label(dev: dict) -> str:
+    """A short name of one control interface for the report."""
+    path = _path_text(dev.get("path", ""))
+    where = ""
+    at = path.find("mi_")
+    if at >= 0:
+        where = path[at:at + 5].upper()
+    return f"{where or '接口'} 0x{dev.get('product_id', 0):04X}"
+
 ASUS_VID = 0x0B05
 
 # The product id of the mouse depends on the connection.
@@ -782,6 +808,7 @@ def read_devices() -> list[AsusDevice]:
     """
     found: list[AsusDevice] = []
     seen: set[tuple[int, str]] = set()
+    _attempts.clear()
 
     for dev in _candidate_interfaces():
         product_id = dev["product_id"]
@@ -792,13 +819,15 @@ def read_devices() -> list[AsusDevice]:
         if key in seen:
             continue
         seen.add(key)
+        label = _interface_label(dev)
 
         try:
             controller = AsusMouseController(
                 raw_path, product_id,
                 _device_name(product_id, dev.get("product_string") or ""),
                 _report_id_for(product_id))
-        except AsusMouseError:
+        except AsusMouseError as error:
+            _note(f"{label}: 打不开（{error}）")
             continue
 
         # One handle is enough for all reads. Opening a second one while
@@ -807,12 +836,15 @@ def read_devices() -> list[AsusDevice]:
         try:
             try:
                 percent, charging = controller.get_battery()
-            except AsusMouseError:
+            except AsusMouseError as error:
+                _note(f"{label}: 读不到电量（{error}）")
                 continue
             if percent <= 0:
                 # A zero reading usually means the mouse is asleep rather
                 # than genuinely empty.
+                _note(f"{label}: 电量报 0，鼠标可能在睡觉")
                 continue
+            _note(f"{label}: 电量={percent}")
 
             # The polling rate and the DPI are optional: a mouse that does
             # not answer them is still shown, it just does not report the

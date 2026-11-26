@@ -110,6 +110,21 @@ class Device:
         return rows
 
 
+def _base_name(name: str) -> str:
+    """The model name without the parenthesised connection hint.
+
+    A driver names a device after the model and adds where it was found,
+    e.g. ``ROG Keris Wireless Aimpoint（2.4G）``, while Windows reports
+    the hardware name ``ROG KERIS WIRELESS AIMPOINT``. The same mouse has
+    to be recognised as one device when it answers on more than one side.
+    """
+    text = name.strip().replace("(", "（")
+    head, sep, tail = text.rpartition("（")
+    if sep and tail.endswith("）"):
+        return head.strip()
+    return text
+
+
 def collect_devices(config: Config) -> tuple[list[Device], list[str]]:
     """Polls every driver and returns the devices that answered.
 
@@ -141,8 +156,9 @@ def collect_devices(config: Config) -> tuple[list[Device], list[str]]:
         # reading that arrives is the one that is shown, because the
         # dedicated HID driver gives the live value.
         for device in found:
+            base = _base_name(device.name).casefold()
             if any(d.kind == device.kind
-                   and d.name.lower() in device.name.lower()
+                   and _base_name(d.name).casefold() in base
                    for d in devices):
                 continue
             devices.append(device)

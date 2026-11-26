@@ -28,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "build_installer"
 DIST = ROOT / "release"
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 APP_NAME = "BatteryTray"
 APP_EXE = "BatteryTray.exe"

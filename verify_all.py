@@ -4530,6 +4530,132 @@ def test_the_update_script_has_clean_line_endings():
     assert b"\r\n" in script_raw
 
 
+def test_the_launcher_drops_the_unpacked_folder_of_the_running_copy():
+    """The new copy has to unpack its own files.
+
+    The program is frozen with PyInstaller. The bootloader of the running
+    copy leaves the path of the folder it unpacked in the environment, and
+    a program that is started with that path believes that the folder is
+    still there. The folder belongs to the running copy and is deleted
+    when it exits, so the new copy used to die with "Failed to load Python
+    DLL" on the machines where the timing went wrong.
+    """
+    from pathlib import Path
+
+    target = Path("C:/app/BatteryTray.exe")
+    source = Path("C:/app/BatteryTray.exe.new")
+    backup = Path("C:/app/BatteryTray.exe.old")
+    script = update._replace_script(target, source, backup, 4321)
+    launcher = Path(str(script).replace("replace.bat", "launch.bat"))
+    try:
+        text = launcher.read_text(encoding="mbcs", errors="replace")
+    finally:
+        script.unlink(missing_ok=True)
+        launcher.unlink(missing_ok=True)
+    for name in update.FROZEN_ENVIRONMENT:
+        assert f'set "{name}="' in text, name
+    # The variables are dropped before the program is started.
+    assert text.index('set "_MEIPASS="') < text.index('start ""')
+
+
+def test_the_update_helper_does_not_hand_them_on_to_the_launcher(
+        tmp_path, monkeypatch):
+    """The interpreter is started by the program, so it is cleaned up too.
+
+    Dropping the variables inside the launcher is the belt; the braces are
+    dropped in the environment of the command interpreter that writes the
+    launcher, so no path of the running copy is handed on by accident.
+    """
+    from pathlib import Path
+
+    program = tmp_path / "BatteryTray.exe"
+    program.write_bytes(b"MZ" + b"\0" * 2048)
+    target = tmp_path / "installed" / "BatteryTray.exe"
+    target.parent.mkdir()
+    target.write_bytes(b"MZ" + b"\0" * 2048)
+    calls = []
+
+    class Helper:
+        """Stands in for the command interpreter."""
+
+    def fake_popen(arguments, **options):
+        calls.append((arguments, options))
+        return Helper()
+
+    for name in update.FROZEN_ENVIRONMENT:
+        monkeypatch.setenv(name, r"C:\Temp\_MEI1234")
+    monkeypatch.setattr(update.subprocess, "Popen", fake_popen)
+
+    assert update.apply_update(program, target=target)
+    assert calls
+    environment = calls[0][1]["env"]
+    cleaned = {name.upper() for name in environment}
+    for name in update.FROZEN_ENVIRONMENT:
+        assert name.upper() not in cleaned, name
+    # The rest of the environment is still handed on.
+    assert "PATH" in cleaned
+    # The helper was not really run, so its scripts are cleaned up here.
+    script = Path(calls[0][0][-1])
+    assert script.name == "replace.bat"
+    script.unlink(missing_ok=True)
+    (script.parent / "launch.bat").unlink(missing_ok=True)
+
+
+def test_one_mouse_is_shown_once_when_it_answers_over_two_connections(
+        monkeypatch):
+    """The 2.4 GHz reading wins over the Bluetooth one of the same mouse.
+
+    A mouse whose receiver is plugged in while it is still paired over
+    Bluetooth is answered on both sides. The two names differ in the hint
+    that names the connection, which used to leave two rows for one mouse,
+    the second of them claiming a Bluetooth link.
+    """
+    from batterytray import app as app_module
+
+    asus = app_module.Device(name="ROG Keris Wireless Aimpoint（2.4G）",
+                             percent=88, kind="mouse",
+                             connection="2.4G", polling_rate=1000,
+                             dpi=1600)
+    bluetooth = app_module.Device(name="ROG KERIS WIRELESS AIMPOINT",
+                                  percent=88, kind="mouse",
+                                  connection="蓝牙")
+    monkeypatch.setattr(app_module, "_read_asus", lambda: [asus])
+    monkeypatch.setattr(app_module, "_read_bluetooth", lambda: [bluetooth])
+    for name in ("_read_razer", "_read_logitech", "_read_hidvendor",
+                 "_read_vendor2", "_read_xbox"):
+        monkeypatch.setattr(app_module, name, lambda: [])
+
+    devices, _failures = collect_devices(Config())
+
+    assert [device.connection for device in devices] == ["2.4G"]
+
+
+def test_the_report_says_why_the_asus_mouse_did_not_answer(monkeypatch):
+    """A receiver that is on the bus but silent has to be explained.
+
+    The driver shows nothing when the mouse does not answer, which is
+    exactly what a missing mouse looks like. The report names every
+    control interface it found and what came back, so that the reader can
+    tell "the mouse is off" from "the mouse is on Bluetooth".
+    """
+    from batterytray import diagnostics
+
+    interface = {"product_id": 0x1A68, "product_string": "ROG KERIS",
+                 "path": b"\\\\?\\hid#vid_0b05&pid_1a68&mi_00#7&1&0"}
+    monkeypatch.setattr(diagnostics.asusmouse, "_candidate_interfaces",
+                        lambda: [interface])
+    monkeypatch.setattr(diagnostics.asusmouse, "last_attempts",
+                        lambda: ("MI_00 0x1A68: 电量报 0，鼠标可能在睡觉",))
+
+    lines = diagnostics._asus_lines()
+
+    text = "\n".join(lines)
+    assert "ASUS 控制接口数: 1" in text
+    assert "0x1A68" in text
+    assert "MI_00" in text
+    assert "电量报 0" in text
+
+
 def test_the_old_program_comes_back_when_the_swap_fails(tmp_path):
     """A failed swap must not leave the user without the app.
 
