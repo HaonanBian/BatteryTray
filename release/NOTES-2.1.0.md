@@ -1,4 +1,4 @@
-# BatteryTray 2.0.3
+# BatteryTray 2.1.0
 
 低电量提醒换成了应用自己的卡片。
 
