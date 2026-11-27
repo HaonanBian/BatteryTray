@@ -29,6 +29,11 @@ DWMSBT_TRANSIENTWINDOW = 3  # Acrylic
 DWMWA_WINDOW_CORNER_PREFERENCE = 33
 DWMWCP_ROUND = 2
 
+# The colour of the hairline Windows draws around the window. The value
+# below tells it to draw none.
+DWMWA_BORDER_COLOR = 34
+DWMWA_COLOR_NONE = 0xFFFFFFFE
+
 # The backdrop of a window is only drawn when the window itself is not
 # layered and has no shadow of its own.
 DWMWA_TRANSITIONS_FORCEDISABLED = 3
@@ -87,6 +92,27 @@ def apply_rounded_corners(hwnd: int) -> bool:
     result = dwmapi.DwmSetWindowAttribute(
         ctypes.c_void_p(hwnd),
         ctypes.c_int(DWMWA_WINDOW_CORNER_PREFERENCE),
+        ctypes.byref(value),
+        ctypes.sizeof(value))
+    return result == 0
+
+
+def hide_window_border(hwnd: int) -> bool:
+    """Removes the light hairline Windows draws around a window.
+
+    Windows 11 puts a frame around every window. On a dark card that is
+    part of the app the light line looks like a frame of another program.
+    """
+    if sys.platform != "win32" or not hwnd:
+        return False
+    try:
+        dwmapi = ctypes.WinDLL("dwmapi")
+    except (AttributeError, OSError):
+        return False
+    value = ctypes.c_uint(DWMWA_COLOR_NONE)
+    result = dwmapi.DwmSetWindowAttribute(
+        ctypes.c_void_p(hwnd),
+        ctypes.c_int(DWMWA_BORDER_COLOR),
         ctypes.byref(value),
         ctypes.sizeof(value))
     return result == 0

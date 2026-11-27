@@ -93,6 +93,11 @@ class BatteryWindow(tk.Tk):
 
         self.quick_panel = QuickPanel(self, on_open=self._open_main_from_panel)
 
+        # The card that says a device is low on charge. It is built the
+        # first time it is needed, so a run without a notification does
+        # not pay for it.
+        self.toast = None
+
         # Closing the window hides it; the tray icon keeps the app alive.
         self.protocol("WM_DELETE_WINDOW", self.withdraw)
 
@@ -491,6 +496,28 @@ class BatteryWindow(tk.Tk):
     def _open_main_from_panel(self) -> None:
         """Closes the tray strip and opens the full window."""
         self.quick_panel.hide()
+        self.show()
+
+    def notify_low_battery(self, device) -> None:
+        """Shows the card that says a device is low on charge.
+
+        The card is reused while it lives, so two devices running low do
+        not stack cards on top of each other.
+        """
+        from .toast import LowBatteryToast
+
+        alive = False
+        if self.toast is not None:
+            try:
+                alive = bool(self.toast.winfo_exists())
+            except Exception:
+                alive = False
+        if not alive:
+            self.toast = LowBatteryToast(self, on_open=self._open_main_from_toast)
+        self.toast.show(device.name, device.percent)
+
+    def _open_main_from_toast(self) -> None:
+        """Opens the window from the low battery card."""
         self.show()
 
     def open_settings(self) -> None:

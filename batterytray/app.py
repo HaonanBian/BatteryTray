@@ -18,7 +18,7 @@ from . import autostart, singleton
 from .config import Config, config_dir
 from .drivers import (asusmouse, bluetooth, hidvendor, hidsupport, logitech,
                       razer, vendor2, xbox)
-from .icon import DeviceState, build_device_icon, build_icon
+from .icon import DeviceState, build_device_icon
 from . import update
 from .update import UpdateError, check_for_update
 
@@ -522,15 +522,6 @@ class TrayApp:
         except OSError:
             pass
 
-    def _save_notification_icon(self) -> None:
-        """Writes the icon used by toast notifications next to the config."""
-        try:
-            directory = config_dir()
-            directory.mkdir(parents=True, exist_ok=True)
-            build_icon([DeviceState(100)], 256).save(directory / "batterytray.png")
-        except OSError:
-            pass
-
     def _tray_devices(self, devices: list[Device]) -> list[Device]:
         """The devices that get an icon of their own.
 
@@ -641,43 +632,23 @@ class TrayApp:
             self._notify(device)
 
     def _notify(self, device: Device) -> None:
-        """Shows a toast notification."""
-        try:
-            from win10toast import ToastNotifier
-        except ImportError:
+        """Tells the user that a device is running low.
+
+        The reminder is drawn with tkinter, so it is built on the thread
+        that owns the window instead of the polling thread.
+        """
+        self._post_to_window(self._show_low_battery, device)
+
+    def _show_low_battery(self, device: Device) -> None:
+        """Shows the reminder on the tkinter thread."""
+        window = self._window
+        if window is None:
             return
         try:
-            toast = ToastNotifier()
-            # Use the app's own icon so the toast matches the tray.
-            icon_path = self._notification_icon_path()
-            if icon_path:
-                toast.show_toast(
-                    "Battery low",
-                    f"{device.name} is at {device.percent}%",
-                    duration=5,
-                    threaded=True,
-                    icon_path=icon_path,
-                )
-                return
-            toast.show_toast(
-                "Battery low",
-                f"{device.name} is at {device.percent}%",
-                duration=5,
-                threaded=True,
-            )
+            window.notify_low_battery(device)
         except Exception:
             # A failed notification must never disturb the polling loop.
             pass
-
-    def _notification_icon_path(self) -> str | None:
-        """Path to the icon used by toast notifications."""
-        path = config_dir() / "batterytray.png"
-        try:
-            if path.exists():
-                return str(path)
-        except OSError:
-            pass
-        return None
 
     def _loop(self) -> None:
         """Polls on a timer until the app stops.
@@ -847,8 +818,6 @@ class TrayApp:
         else:
             self._window.withdraw()
         self._window.protocol("WM_DELETE_WINDOW", self._window.withdraw)
-
-        self._save_notification_icon()
 
         threading.Thread(target=self._loop, daemon=True).start()
 

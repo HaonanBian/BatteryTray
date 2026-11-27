@@ -1757,6 +1757,121 @@ def test_the_windows_use_one_palette():
     assert quickpanel.MUTED == FG_MUTED
 
 
+def test_the_low_battery_reminder_uses_the_window_style(gui_window):
+    """The reminder is a card like the rows of the main window.
+
+    Windows shows a grey balloon with the name of the process and an
+    English sentence in it. The app draws its own card in the colours of
+    the window instead.
+    """
+    pytest.importorskip("tkinter")
+
+    from batterytray.toast import LowBatteryToast
+    from batterytray.widgets import BG_BORDER, BG_CARD
+
+    card = LowBatteryToast(gui_window)
+    try:
+        card.show("Razer Viper V3 Pro Wireless", 9)
+        for _ in range(40):
+            gui_window.update()
+            time.sleep(0.01)
+
+        assert card.canvas["bg"] == BG_CARD
+        assert card["bg"] == BG_BORDER
+        assert float(card.attributes("-alpha")) == 1.0
+
+        texts = [card.canvas.itemcget(item, "text")
+                 for item in card.canvas.find_all()
+                 if card.canvas.type(item) == "text"]
+        assert "Razer Viper V3 Pro Wireless" in texts
+        assert any("电量低" in text and "9%" in text for text in texts), texts
+
+        # It belongs to the notification area, not to the middle of the
+        # desktop.
+        screen_w = card.winfo_screenwidth()
+        assert card.winfo_x() + card.winfo_width() <= screen_w
+        assert card.winfo_x() > screen_w // 2
+    finally:
+        card._destroy()
+
+
+def test_the_low_battery_reminder_goes_away_by_itself(gui_window):
+    """A notification that stays forever is in the way."""
+    pytest.importorskip("tkinter")
+
+    from batterytray.toast import LowBatteryToast
+
+    card = LowBatteryToast(gui_window)
+    card.show("Razer Viper V3 Pro Wireless", 9)
+    gui_window.update()
+    card.close()
+
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        gui_window.update()
+        if not card.winfo_exists():
+            break
+        time.sleep(0.01)
+
+    assert not card.winfo_exists(), "the card has to close itself"
+
+
+def test_clicking_the_low_battery_reminder_opens_the_window(gui_window):
+    """The card is a way into the window, the same as the cards."""
+    pytest.importorskip("tkinter")
+
+    from batterytray.toast import LowBatteryToast
+
+    opened = []
+    card = LowBatteryToast(gui_window, on_open=lambda: opened.append(1))
+    try:
+        card.show("Razer Viper V3 Pro Wireless", 9)
+        gui_window.update()
+        card.canvas.event_generate("<Button-1>", x=10, y=10)
+        gui_window.update()
+        assert opened == [1]
+    finally:
+        card._destroy()
+
+
+def test_the_low_battery_reminder_is_built_on_the_window_thread():
+    """The polling thread must not draw: the window builds the card.
+
+    The reminder is a tkinter window, and tkinter may only be touched from
+    the thread that owns it. The poll that notices the low charge runs in
+    the reading thread, so the card is queued for the window.
+    """
+    from batterytray.app import Device, TrayApp
+
+    class FakeWindow:
+        """Stands in for the window, and keeps what it is asked to do."""
+
+        def __init__(self):
+            self.dpi = 96.0
+            self.family = "Segoe UI"
+            self.pending = []
+            self.cards = []
+
+        def post(self, func, *args):
+            self.pending.append((func, args))
+
+        def notify_low_battery(self, device):
+            self.cards.append(device)
+
+    window = FakeWindow()
+    app = TrayApp(config=Config())
+    app._window = window
+    device = Device("Razer Viper V3 Pro Wireless", 9)
+
+    app._notify(device)
+
+    assert [func for func, _args in window.pending] == [app._show_low_battery]
+    assert window.cards == [], "nothing is drawn from the polling thread"
+    for func, args in window.pending:
+        func(*args)
+    assert window.cards == [device]
+
+
 def test_the_report_names_every_driver():
     """The report has to say what every driver answered.
 

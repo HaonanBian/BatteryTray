@@ -40,7 +40,7 @@ a = Analysis(
         "batterytray.drivers.devices",
         "batterytray.drivers.hidsupport",
         "batterytray.drivers.xbox",
-        "win10toast",
+        "batterytray.toast",
     ],
     hookspath=[],
     hooksconfig={},
